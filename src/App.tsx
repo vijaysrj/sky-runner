@@ -7,7 +7,7 @@ const RUN_H = 1.7
 const SLIDE_H = 0.8
 const GRAVITY = 0.0105
 const JUMP_V = 0.22
-const RAMP_V = 0.29
+const RAMP_HEIGHT = 0.9
 const BEST_KEY = 'runner-best'
 const TRACK_LEN = 90
 const ROAD_HALF = 2.8
@@ -200,9 +200,14 @@ function update(s: State) {
   for (const o of s.obstacles) {
     if (o.hit || o.lane !== s.lane || Math.abs(o.z) > HALF_LEN[o.kind] + PLAYER_HALF_DEPTH) continue
     if (o.kind === 'ramp') {
-      if (s.py <= 0) {
-        s.vy = RAMP_V
-        s.sliding = 0
+      if (o.lane === s.lane && Math.abs(o.z) < 0.8) {
+        const h = (RAMP_HEIGHT * (o.z + 0.8)) / 1.6
+        if (s.py <= h + 0.05) {
+          s.py = h
+          s.vy = 0
+          s.sliding = 0
+        }
+      } else if (o.z >= 0.8) {
         o.hit = true
       }
       continue
