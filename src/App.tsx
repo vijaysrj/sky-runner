@@ -7,8 +7,7 @@ const RUN_H = 1.7
 const SLIDE_H = 0.8
 const GRAVITY = 0.00623
 const JUMP_V = 0.187
-const RAMP_HEIGHT = 0.9
-const RAMP_LAUNCH = 0.15
+const RAMP_HEIGHT = 1.6
 const BEST_KEY = 'runner-best'
 const SETTINGS_KEY = 'runner-settings'
 
@@ -96,6 +95,7 @@ type State = {
   fumble: number
   speedBoost: number
   jumpBoost: number
+  loaded: boolean
 }
 
 const THEMES = [
@@ -174,7 +174,7 @@ function reset(s: State) {
 
 function act(s: State, a: Action) {
   if (s.status !== 'playing') {
-    reset(s)
+    if (s.loaded) reset(s)
     return
   }
   if (s.fumble > 0) return
@@ -304,7 +304,6 @@ function update(s: State, paceMul: number) {
           s.sliding = 0
         }
       } else if (o.z >= 0.8) {
-        if (o.lane === s.lane && s.py >= RAMP_HEIGHT - 0.1) s.vy = RAMP_LAUNCH
         o.hit = true
       }
       continue
@@ -593,7 +592,7 @@ function buildRampGeometry() {
   const shape = new THREE.Shape()
   shape.moveTo(0, 0)
   shape.lineTo(1.6, 0)
-  shape.lineTo(0, 0.9)
+  shape.lineTo(0, RAMP_HEIGHT)
   shape.closePath()
   const geo = new THREE.ExtrudeGeometry(shape, { depth: 1.3, bevelEnabled: false })
   geo.translate(-0.8, 0, -0.65)
@@ -887,6 +886,7 @@ export default function App() {
     level: 1,
     flash: 0,
     fumble: 0,
+    loaded: false,
     speedBoost: 0,
     jumpBoost: 0,
   })
@@ -900,6 +900,7 @@ export default function App() {
     flash: 0,
     speedOn: false,
     jumpOn: false,
+    loaded: false,
   })
 
   useEffect(() => {
@@ -1047,6 +1048,7 @@ export default function App() {
 
     const runner = makeRunner(a)
     scene.add(runner.group)
+    runner.group.visible = false
 
 
     let modelRoot: THREE.Group | null = null
@@ -1082,6 +1084,7 @@ export default function App() {
       }
       runner.group.visible = false
       modelRoot = root
+      s.loaded = true
     })
 
     const obstacleMeshes = new Map<Obstacle, THREE.Group>()
@@ -1099,7 +1102,7 @@ export default function App() {
 
     let frame = 0
     let camX = 0
-    let last = { score: -1, coins: -1, hearts: -1, status: '' as Status, level: 0, flash: 0, speedOn: false, jumpOn: false }
+    let last = { score: -1, coins: -1, hearts: -1, status: '' as Status, level: 0, flash: 0, speedOn: false, jumpOn: false, loaded: false }
 
     const STEP = 1000 / 60
     let acc = 0
@@ -1184,7 +1187,7 @@ export default function App() {
       runner.torso.scale.y = 1
       runner.torso.position.y = 1.2
       runner.headGroup.position.y = 1.85
-      body.visible = !(s.invuln > 0 && Math.floor(s.tick / 5) % 2 === 0)
+      body.visible = modelRoot !== null && !(s.invuln > 0 && Math.floor(s.tick / 5) % 2 === 0)
 
       a.roadMat.map!.offset.y = (s.dist / 8) % 1
       for (let i = 0; i < roadPos.count; i++) {
@@ -1277,12 +1280,13 @@ export default function App() {
         s.coinCount !== last.coins ||
         s.hearts !== last.hearts ||
         s.status !== last.status ||
+        s.loaded !== last.loaded ||
         s.level !== last.level ||
         flashOn !== last.flash ||
         (s.speedBoost > 0) !== (last.speedOn ?? false) ||
         (s.jumpBoost > 0) !== (last.jumpOn ?? false)
       ) {
-        last = { score, coins: s.coinCount, hearts: s.hearts, status: s.status, level: s.level, flash: flashOn, speedOn: s.speedBoost > 0, jumpOn: s.jumpBoost > 0 }
+        last = { score, coins: s.coinCount, hearts: s.hearts, status: s.status, level: s.level, flash: flashOn, speedOn: s.speedBoost > 0, jumpOn: s.jumpBoost > 0, loaded: s.loaded }
         setHud({
           status: s.status,
           score,
@@ -1293,6 +1297,7 @@ export default function App() {
           flash: flashOn,
           speedOn: s.speedBoost > 0,
           jumpOn: s.jumpBoost > 0,
+          loaded: s.loaded,
         })
       }
       frame = requestAnimationFrame(loop)
@@ -1438,7 +1443,7 @@ export default function App() {
               {hud.status === 'ready' ? (
                 <>
                   <h1 className="text-3xl font-extrabold mb-2">Sky Runner</h1>
-                  <p className="text-lg mb-6">{loadLevel() > 1 ? `Continue from Level ${loadLevel()}` : 'Tap the screen to start'}</p>
+                  <p className="text-lg mb-6">{!hud.loaded ? 'Loading…' : loadLevel() > 1 ? `Continue from Level ${loadLevel()}` : 'Tap the screen to start'}</p>
                 </>
               ) : (
                 <>
