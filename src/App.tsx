@@ -1255,7 +1255,7 @@ export default function App() {
     e.currentTarget.setPointerCapture(e.pointerId)
   }
 
-  function onSurfaceMove(e: React.PointerEvent<HTMLDivElement>) {
+  function classifySwipe(e: React.PointerEvent<HTMLDivElement>, final: boolean) {
     const start = swipeStart.current
     if (!start) return
     const dx = e.clientX - start.x
@@ -1271,11 +1271,17 @@ export default function App() {
     } else if (dy <= -THRESHOLD && -dy > Math.abs(dx)) {
       act(s, 'jump')
       swipeStart.current = null
+    } else if (final) {
+      act(s, 'jump')
     }
   }
 
-  function onSurfaceUp() {
-    if (swipeStart.current) act(stateRef.current, 'jump')
+  function onSurfaceMove(e: React.PointerEvent<HTMLDivElement>) {
+    classifySwipe(e, false)
+  }
+
+  function onSurfaceUp(e: React.PointerEvent<HTMLDivElement>) {
+    classifySwipe(e, true)
     swipeStart.current = null
   }
 
@@ -1300,7 +1306,7 @@ export default function App() {
             onPointerDown={onSurfaceDown}
             onPointerMove={onSurfaceMove}
             onPointerUp={onSurfaceUp}
-            onPointerCancel={onSurfaceUp}
+            onPointerCancel={() => { swipeStart.current = null }}
             className="w-full rounded-3xl overflow-hidden shadow-lg"
             style={{ height: 'min(640px, calc(100vh - 210px))', touchAction: 'none' }}
           />
