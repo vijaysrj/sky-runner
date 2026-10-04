@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
+import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
 
 const LANE_X = [-1.7, 0, 1.7]
 const RUN_H = 1.7
@@ -767,8 +768,8 @@ export default function App() {
     road.receiveShadow = true
     scene.add(road)
 
-    const CURB_SEG = 24
-    const CURB_LEN = 10
+    const CURB_SEG = 48
+    const CURB_LEN = 5
     const curbs: { mesh: THREE.Mesh; side: number; z: number }[] = []
     for (const side of [-1, 1]) {
       for (let i = 0; i < CURB_SEG; i++) {
@@ -807,6 +808,41 @@ export default function App() {
     const runner = makeRunner(a)
     scene.add(runner.group)
 
+    let modelRoot: THREE.Group | null = null
+    let mixer: THREE.AnimationMixer | null = null
+    const clock = new THREE.Clock()
+    new FBXLoader().load(`${import.meta.env.BASE_URL}girl.fbx`, (obj) => {
+      obj.traverse((c) => {
+        if ((c as THREE.Mesh).isMesh) {
+          c.castShadow = true
+          c.receiveShadow = true
+        }
+      })
+      const root = new THREE.Group()
+      root.add(obj)
+      root.updateMatrixWorld(true)
+      const b = new THREE.Box3().setFromObject(root)
+      const sc = 1.85 / (b.max.y - b.min.y)
+      root.scale.setScalar(sc)
+      root.updateMatrixWorld(true)
+      const b2 = new THREE.Box3().setFromObject(root)
+      obj.position.set(
+        -((b2.min.x + b2.max.x) / 2) / sc,
+        -b2.min.y / sc,
+        -((b2.min.z + b2.max.z) / 2) / sc,
+      )
+      root.rotation.y = Math.PI
+      scene.add(root)
+      mixer = new THREE.AnimationMixer(obj)
+      const clip = obj.animations[0]
+      if (clip) {
+        clip.tracks = clip.tracks.filter((t) => !t.name.endsWith('.position'))
+        mixer.clipAction(clip).play()
+      }
+      runner.group.visible = false
+      modelRoot = root
+    })
+
     const obstacleMeshes = new Map<Obstacle, THREE.Group>()
     const coinMeshes = new Map<Coin, THREE.Group>()
 
@@ -828,6 +864,8 @@ export default function App() {
     let acc = 0
     let prevTime = performance.now()
     const loop = (now: number) => {
+      const body: THREE.Object3D = modelRoot ?? runner.group
+      mixer?.update(clock.getDelta())
       acc += Math.min(now - prevTime, 100)
       prevTime = now
       let steps = 0
@@ -847,8 +885,8 @@ export default function App() {
       if (steps === 4) acc = 0
       applyTheme(s.level - 1)
 
-      runner.group.position.x = s.x
-      runner.group.position.y = s.py
+      body.position.x = s.x
+      body.position.y = s.py
       const running = s.status === 'playing' && s.py <= 0 && s.sliding === 0
       const swing = running ? Math.sin(s.tick * 0.35) * 0.6 : 0
       runner.legL.rotation.x = swing
@@ -857,22 +895,22 @@ export default function App() {
       runner.armR.rotation.x = swing * 0.6
       if (s.fumble > 0) {
         const wobble = Math.sin(s.tick * 0.45)
-        runner.group.rotation.z = wobble * 0.32
+        body.rotation.z = wobble * 0.32
         runner.armL.rotation.x = -2.2 + wobble * 0.5
         runner.armR.rotation.x = -2.2 - wobble * 0.5
         runner.legL.rotation.x = wobble * 0.5
         runner.legR.rotation.x = -wobble * 0.5
       } else {
-        runner.group.rotation.z = 0
+        body.rotation.z = 0
       }
       const sliding = s.sliding > 0
       const targetTilt = sliding ? -1.4 : 0
-      runner.group.rotation.x += (targetTilt - runner.group.rotation.x) * 0.3
-      runner.group.position.y = s.py + (sliding ? 0.38 : 0) * (1 - Math.abs(runner.group.rotation.x) / 1.4)
+      body.rotation.x += (targetTilt - body.rotation.x) * 0.3
+      body.position.y = s.py + (sliding ? 0.38 : 0) * (1 - Math.abs(body.rotation.x) / 1.4)
       runner.torso.scale.y = 1
       runner.torso.position.y = 1.2
       runner.headGroup.position.y = 1.85
-      runner.group.visible = !(s.invuln > 0 && Math.floor(s.tick / 5) % 2 === 0)
+      body.visible = !(s.invuln > 0 && Math.floor(s.tick / 5) % 2 === 0)
 
       a.roadMat.map!.offset.y = (s.dist / 8) % 1
       for (let i = 0; i < roadPos.count; i++) {
@@ -882,7 +920,9 @@ export default function App() {
       for (const c of curbs) {
         c.z += s.speed
         if (c.z > 14) c.z -= CURB_SEG * CURB_LEN
+        const slope = offsetAt(s.dist, c.z + 0.5) - offsetAt(s.dist, c.z - 0.5)
         c.mesh.position.set(c.side * (ROAD_HALF + 0.15) + offsetAt(s.dist, c.z), 0.07, c.z)
+        c.mesh.rotation.y = Math.atan2(slope, 1)
       }
       for (const t of trees) {
         t.group.position.z += s.speed
