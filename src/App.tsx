@@ -844,6 +844,7 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(() => loadSettings())
   const [showSettings, setShowSettings] = useState(false)
   const settingsRef = useRef(settings)
+  const pausedRef = useRef(false)
   const mountRef = useRef<HTMLDivElement>(null)
   const stateRef = useRef<State>({
     status: 'ready',
@@ -1089,7 +1090,8 @@ export default function App() {
       acc += Math.min(now - prevTime, 100)
       prevTime = now
       let steps = 0
-      while (acc >= STEP && steps < 4) {
+      if (pausedRef.current) acc = 0
+      while (acc >= STEP && steps < 4 && !pausedRef.current) {
         const wasPlaying = s.status === 'playing'
         update(s, PACE_OPTIONS.find((o) => o.value === settingsRef.current.pace)?.mul ?? 1)
         if (wasPlaying && s.status === 'over') {
@@ -1306,6 +1308,10 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    pausedRef.current = showSettings
+  }, [showSettings])
+
+  useEffect(() => {
     settingsRef.current = settings
     saveSettings(settings)
   }, [settings])
@@ -1361,7 +1367,20 @@ export default function App() {
         <div className="flex justify-between items-center text-slate-800 font-extrabold text-lg px-1 mb-2">
           <span>Score {hud.score}</span>
           <span>Coins {hud.coins}</span>
-          <span className="text-pink-500">{'♥'.repeat(hud.hearts) || '·'}</span>
+          <span className="flex items-center gap-3">
+            <span className="text-pink-500">{'♥'.repeat(hud.hearts) || '·'}</span>
+            <button
+              type="button"
+              aria-label="Settings"
+              onPointerDown={(e) => {
+                e.stopPropagation()
+                setShowSettings(true)
+              }}
+              className="w-9 h-9 rounded-full bg-white/80 text-slate-800 text-lg shadow touch-manipulation"
+            >
+              ⚙
+            </button>
+          </span>
         </div>
         {(hud.speedOn || hud.jumpOn) && (
           <div className="flex justify-center gap-2 mb-2 text-xs font-bold">
