@@ -50,9 +50,9 @@ const THEMES = [
 const CAR_COLORS = [0xf472b6, 0xa855f7, 0x38bdf8, 0xfacc15]
 const TRAIN_COLOR = 0x22d3ee
 
-const NEEDED_HEIGHT: Partial<Record<Kind, number>> = { crate: 0.8, car: 1.9, train: 2.7 }
+const NEEDED_HEIGHT: Partial<Record<Kind, number>> = { crate: 0.5, car: 1.9, train: 2.7 }
 const PLAYER_HALF_DEPTH = 0.2
-const HALF_LEN: Record<Kind, number> = { crate: 0.5, overhead: 0.5, car: 1.1, train: 3.0, ramp: 0.8 }
+const HALF_LEN: Record<Kind, number> = { crate: 0.35, overhead: 0.5, car: 1.1, train: 3.0, ramp: 0.8 }
 
 function levelOf(dist: number) {
   let level = 1
