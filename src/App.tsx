@@ -4,8 +4,8 @@ import * as THREE from 'three'
 const LANE_X = [-1.7, 0, 1.7]
 const RUN_H = 1.7
 const SLIDE_H = 0.8
-const GRAVITY = 0.0115
-const JUMP_V = 0.2
+const GRAVITY = 0.0105
+const JUMP_V = 0.22
 const RAMP_V = 0.29
 const BEST_KEY = 'runner-best'
 const TRACK_LEN = 90
@@ -13,7 +13,7 @@ const ROAD_HALF = 2.8
 const LEVEL_DIST = [0, 700, 1600, 2600, 3800]
 
 type Status = 'ready' | 'playing' | 'over'
-type Kind = 'crate' | 'overhead' | 'car' | 'train' | 'ramp'
+type Kind = 'crate' | 'overhead' | 'car' | 'train' | 'ramp' | 'puddle' | 'lava'
 type Obstacle = { kind: Kind; lane: number; z: number; hit: boolean; color: number }
 type Coin = { lane: number; z: number; y: number; taken: boolean }
 type Action = 'left' | 'right' | 'jump' | 'slide'
@@ -37,6 +37,7 @@ type State = {
   best: number
   level: number
   flash: number
+  fumble: number
 }
 
 const THEMES = [
@@ -50,12 +51,13 @@ const THEMES = [
 const CAR_COLORS = [0xf472b6, 0xa855f7, 0x38bdf8, 0xfacc15]
 const TRAIN_COLOR = 0x22d3ee
 
-const NEEDED_HEIGHT: Partial<Record<Kind, number>> = { crate: 0.5, car: 1.9, train: 2.7 }
+const NEEDED_HEIGHT: Partial<Record<Kind, number>> = { crate: 0.5, lava: 0.5, car: 2.6, train: 2.7 }
 const PLAYER_HALF_DEPTH = 0.2
-const HALF_LEN: Record<Kind, number> = { crate: 0.35, overhead: 0.5, car: 1.1, train: 3.0, ramp: 0.8 }
+const HALF_LEN: Record<Kind, number> = { crate: 0.35, overhead: 0.5, car: 1.1, train: 3.0, ramp: 0.8, puddle: 0.8, lava: 0.9 }
+const FUMBLE_FRAMES = 150
 
 function bend(p: number) {
-  return 1.6 * Math.sin(p * 0.0045) + 0.7 * Math.sin(p * 0.013 + 1.3)
+  return 4.6 * Math.sin(p * 0.013) + 1.8 * Math.sin(p * 0.029 + 1.3)
 }
 
 function offsetAt(dist: number, z: number) {
@@ -105,6 +107,7 @@ function reset(s: State) {
     tick: 0,
     level: 1,
     flash: 0,
+    fumble: 0,
   })
 }
 
@@ -113,6 +116,7 @@ function act(s: State, a: Action) {
     reset(s)
     return
   }
+  if (s.fumble > 0) return
   if (a === 'left') s.lane = Math.max(0, s.lane - 1)
   if (a === 'right') s.lane = Math.min(2, s.lane + 1)
   if (a === 'jump' && s.py <= 0) {
@@ -128,6 +132,8 @@ function pickKind(level: number): Kind | 'coins' {
     ['crate', 3],
     ['ramp', 1.5 + level * 0.3],
   ]
+  weights.push(['puddle', 2])
+  if (level >= 2) weights.push(['lava', 1 + level * 0.3])
   if (level >= 2) weights.push(['overhead', 2])
   if (level >= 2) weights.push(['car', 1.5 + level * 0.4])
   if (level >= 2) weights.push(['train', 0.6 + level * 0.2])
@@ -173,8 +179,9 @@ function update(s: State) {
     s.flash = 150
   }
   if (s.flash > 0) s.flash--
+  if (s.fumble > 0) s.fumble--
 
-  s.speed = Math.min(0.36, 0.11 + (s.level - 1) * 0.035)
+  s.speed = Math.min(0.36, 0.13 + (s.level - 1) * 0.035) * (s.fumble > 0 ? 0.35 : 1)
   s.dist += s.speed
   if (s.invuln > 0) s.invuln--
 
@@ -195,6 +202,13 @@ function update(s: State) {
       if (s.py <= 0) {
         s.vy = RAMP_V
         s.sliding = 0
+        o.hit = true
+      }
+      continue
+    }
+    if (o.kind === 'puddle') {
+      if (s.py <= 0.1) {
+        s.fumble = FUMBLE_FRAMES
         o.hit = true
       }
       continue
@@ -345,6 +359,21 @@ function buildAssets() {
     }
   })
 
+  const lavaTex = canvasTexture(256, 256, (ctx) => {
+    const g = ctx.createRadialGradient(128, 128, 20, 128, 128, 150)
+    g.addColorStop(0, '#fde047')
+    g.addColorStop(0.5, '#f97316')
+    g.addColorStop(1, '#7f1d1d')
+    ctx.fillStyle = g
+    ctx.fillRect(0, 0, 256, 256)
+    for (let i = 0; i < 40; i++) {
+      ctx.fillStyle = 'rgba(254,240,138,0.6)'
+      ctx.beginPath()
+      ctx.arc(Math.random() * 256, Math.random() * 256, 4 + Math.random() * 10, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  })
+
   const carMats = CAR_COLORS.map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.4, metalness: 0.1 }))
 
   return {
@@ -354,6 +383,8 @@ function buildAssets() {
     woodMat: new THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.8 }),
     hazardMat: new THREE.MeshStandardMaterial({ map: hazardTex, roughness: 0.5 }),
     rampMat: new THREE.MeshStandardMaterial({ map: rampTex, roughness: 0.6 }),
+    puddleMat: new THREE.MeshStandardMaterial({ color: '#7dd3fc', roughness: 0.05, metalness: 0.2, transparent: true, opacity: 0.85 }),
+    lavaMat: new THREE.MeshStandardMaterial({ map: lavaTex, emissive: '#f97316', emissiveMap: lavaTex, emissiveIntensity: 0.9, roughness: 0.4 }),
     trainMat: new THREE.MeshStandardMaterial({ map: trainWindowTex, roughness: 0.5 }),
     trainBodyMat: new THREE.MeshStandardMaterial({ color: TRAIN_COLOR, roughness: 0.5 }),
     carMats,
@@ -414,6 +445,7 @@ function buildAssets() {
       shoe: new THREE.SphereGeometry(0.17, 16, 12),
       backpack: new THREE.BoxGeometry(0.42, 0.46, 0.16),
       ramp: buildRampGeometry(),
+      disc: new THREE.CircleGeometry(1, 28),
     },
   }
 }
@@ -577,6 +609,27 @@ function makeTrain(a: Assets) {
   return g
 }
 
+function makePuddle(a: Assets) {
+  const g = new THREE.Group()
+  const disc = new THREE.Mesh(a.geo.disc, a.puddleMat)
+  disc.rotation.x = -Math.PI / 2
+  disc.scale.set(0.95, 0.6, 1)
+  disc.position.y = 0.02
+  disc.receiveShadow = true
+  g.add(disc)
+  return g
+}
+
+function makeLava(a: Assets) {
+  const g = new THREE.Group()
+  const disc = new THREE.Mesh(a.geo.disc, a.lavaMat)
+  disc.rotation.x = -Math.PI / 2
+  disc.scale.set(1.0, 0.9, 1)
+  disc.position.y = 0.03
+  g.add(disc)
+  return g
+}
+
 function makeRamp(a: Assets) {
   const g = new THREE.Group()
   g.add(mesh(a.geo.ramp, a.rampMat))
@@ -634,6 +687,7 @@ export default function App() {
     best: loadBest(),
     level: 1,
     flash: 0,
+    fumble: 0,
   })
   const [hud, setHud] = useState({
     status: 'ready' as Status,
@@ -657,7 +711,7 @@ export default function App() {
     renderer.toneMapping = THREE.ACESFilmicToneMapping
     renderer.toneMappingExposure = 1.05
     renderer.shadowMap.enabled = true
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap
+    renderer.shadowMap.type = THREE.PCFShadowMap
     mount.appendChild(renderer.domElement)
 
     const scene = new THREE.Scene()
@@ -671,7 +725,7 @@ export default function App() {
     const sun = new THREE.DirectionalLight('#fff7ed', THEMES[0].sun)
     sun.position.set(5, 11, 5)
     sun.castShadow = true
-    sun.shadow.mapSize.set(1024, 1024)
+    sun.shadow.mapSize.set(512, 512)
     sun.shadow.camera.left = -9
     sun.shadow.camera.right = 9
     sun.shadow.camera.top = 14
@@ -770,16 +824,27 @@ export default function App() {
     let camX = 0
     let last = { score: -1, coins: -1, hearts: -1, status: '' as Status, level: 0, flash: 0 }
 
-    const loop = () => {
-      const wasPlaying = s.status === 'playing'
-      update(s)
-      if (wasPlaying && s.status === 'over') {
-        const score = scoreOf(s)
-        if (score > s.best) {
-          s.best = score
-          saveBest(score)
+    const STEP = 1000 / 60
+    let acc = 0
+    let prevTime = performance.now()
+    const loop = (now: number) => {
+      acc += Math.min(now - prevTime, 100)
+      prevTime = now
+      let steps = 0
+      while (acc >= STEP && steps < 4) {
+        const wasPlaying = s.status === 'playing'
+        update(s)
+        if (wasPlaying && s.status === 'over') {
+          const score = scoreOf(s)
+          if (score > s.best) {
+            s.best = score
+            saveBest(score)
+          }
         }
+        acc -= STEP
+        steps++
       }
+      if (steps === 4) acc = 0
       applyTheme(s.level - 1)
 
       runner.group.position.x = s.x
@@ -790,6 +855,16 @@ export default function App() {
       runner.legR.rotation.x = -swing
       runner.armL.rotation.x = -swing * 0.6
       runner.armR.rotation.x = swing * 0.6
+      if (s.fumble > 0) {
+        const wobble = Math.sin(s.tick * 0.45)
+        runner.group.rotation.z = wobble * 0.32
+        runner.armL.rotation.x = -2.2 + wobble * 0.5
+        runner.armR.rotation.x = -2.2 - wobble * 0.5
+        runner.legL.rotation.x = wobble * 0.5
+        runner.legR.rotation.x = -wobble * 0.5
+      } else {
+        runner.group.rotation.z = 0
+      }
       const sliding = s.sliding > 0
       const targetTilt = sliding ? -1.4 : 0
       runner.group.rotation.x += (targetTilt - runner.group.rotation.x) * 0.3
@@ -826,6 +901,8 @@ export default function App() {
           else if (o.kind === 'overhead') m = makeOverhead(a)
           else if (o.kind === 'car') m = makeCar(a, o.color)
           else if (o.kind === 'train') m = makeTrain(a)
+          else if (o.kind === 'puddle') m = makePuddle(a)
+          else if (o.kind === 'lava') m = makeLava(a)
           else m = makeRamp(a)
           scene.add(m)
           obstacleMeshes.set(o, m)
@@ -928,22 +1005,27 @@ export default function App() {
   function onSurfaceDown(e: React.PointerEvent<HTMLDivElement>) {
     swipeStart.current = { x: e.clientX, y: e.clientY }
     e.currentTarget.setPointerCapture(e.pointerId)
+    act(stateRef.current, 'jump')
   }
 
-  function onSurfaceUp(e: React.PointerEvent<HTMLDivElement>) {
+  function onSurfaceMove(e: React.PointerEvent<HTMLDivElement>) {
     const start = swipeStart.current
-    swipeStart.current = null
     if (!start) return
     const dx = e.clientX - start.x
     const dy = e.clientY - start.y
     const s = stateRef.current
-    if (Math.abs(dx) < 24 && Math.abs(dy) < 24) {
-      act(s, 'jump')
-    } else if (Math.abs(dx) > Math.abs(dy)) {
+    const THRESHOLD = 26
+    if (Math.abs(dx) >= THRESHOLD && Math.abs(dx) > Math.abs(dy)) {
       act(s, dx < 0 ? 'left' : 'right')
-    } else {
-      act(s, dy < 0 ? 'jump' : 'slide')
+      swipeStart.current = { x: e.clientX, y: e.clientY }
+    } else if (dy >= THRESHOLD && dy > Math.abs(dx)) {
+      act(s, 'slide')
+      swipeStart.current = null
     }
+  }
+
+  function onSurfaceUp() {
+    swipeStart.current = null
   }
 
   const btn =
@@ -965,7 +1047,9 @@ export default function App() {
           <div
             ref={mountRef}
             onPointerDown={onSurfaceDown}
+            onPointerMove={onSurfaceMove}
             onPointerUp={onSurfaceUp}
+            onPointerCancel={onSurfaceUp}
             className="w-full rounded-3xl overflow-hidden shadow-lg"
             style={{ height: 'min(640px, calc(100vh - 210px))', touchAction: 'none' }}
           />
