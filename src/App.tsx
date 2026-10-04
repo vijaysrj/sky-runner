@@ -9,13 +9,51 @@ const GRAVITY = 0.0105
 const JUMP_V = 0.22
 const RAMP_HEIGHT = 0.9
 const BEST_KEY = 'runner-best'
+const SETTINGS_KEY = 'runner-settings'
+
+type Weather = 'summer' | 'winter' | 'stormy' | 'fog'
+type Pace = 'relaxed' | 'normal' | 'fast'
+type Settings = { weather: Weather; pace: Pace }
+
+const WEATHER_OPTIONS: { value: Weather; label: string }[] = [
+  { value: 'summer', label: 'Summer' },
+  { value: 'winter', label: 'Snow' },
+  { value: 'stormy', label: 'Storm' },
+  { value: 'fog', label: 'Fog' },
+]
+const PACE_OPTIONS: { value: Pace; label: string; mul: number }[] = [
+  { value: 'relaxed', label: 'Relaxed', mul: 0.6 },
+  { value: 'normal', label: 'Normal', mul: 1 },
+  { value: 'fast', label: 'Fast', mul: 1.6 },
+]
+const defaultSettings: Settings = { weather: 'summer', pace: 'normal' }
+
+const WEATHER_LOOK: Record<Exclude<Weather, 'summer'>, { sky: string; fog: string; grass: string; sun: number; hemi: number; near: number; far: number }> = {
+  winter: { sky: '#dbeafe', fog: '#e2e8f0', grass: '#f8fafc', sun: 1.4, hemi: 0.9, near: 30, far: 80 },
+  stormy: { sky: '#475569', fog: '#334155', grass: '#4b5563', sun: 0.5, hemi: 0.6, near: 18, far: 60 },
+  fog: { sky: '#e5e7eb', fog: '#e5e7eb', grass: '#d1d5db', sun: 0.8, hemi: 0.9, near: 6, far: 28 },
+}
+
+function loadSettings(): Settings {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY)
+    if (raw) return { ...defaultSettings, ...(JSON.parse(raw) as Partial<Settings>) }
+  } catch {}
+  return defaultSettings
+}
+
+function saveSettings(settings: Settings) {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
+  } catch {}
+}
 const TRACK_LEN = 90
 const ROAD_HALF = 2.8
 const LEVEL_DIST = [0, 700, 1600, 2600, 3800]
 
 type Status = 'ready' | 'playing' | 'over'
-type Kind = 'crate' | 'overhead' | 'car' | 'train' | 'ramp' | 'puddle' | 'lava'
-type Obstacle = { kind: Kind; lane: number; z: number; hit: boolean; color: number }
+type Kind = 'crate' | 'overhead' | 'car' | 'train' | 'ramp' | 'puddle' | 'lava' | 'animal'
+type Obstacle = { kind: Kind; lane: number; z: number; hit: boolean; color: number; cross: number; dir: number }
 type Coin = { lane: number; z: number; y: number; taken: boolean }
 type Action = 'left' | 'right' | 'jump' | 'slide'
 
@@ -54,7 +92,7 @@ const TRAIN_COLOR = 0x22d3ee
 
 const NEEDED_HEIGHT: Partial<Record<Kind, number>> = { crate: 0.5, lava: 0.5, car: 2.6, train: 2.7 }
 const PLAYER_HALF_DEPTH = 0.2
-const HALF_LEN: Record<Kind, number> = { crate: 0.35, overhead: 0.5, car: 1.1, train: 3.0, ramp: 0.8, puddle: 0.8, lava: 0.9 }
+const HALF_LEN: Record<Kind, number> = { crate: 0.35, overhead: 0.5, car: 1.1, train: 3.0, ramp: 0.8, puddle: 0.8, lava: 0.9, animal: 0.6 }
 const FUMBLE_FRAMES = 150
 
 function bend(p: number) {
@@ -135,6 +173,7 @@ function pickKind(level: number): Kind | 'coins' {
   ]
   weights.push(['puddle', 2])
   if (level >= 2) weights.push(['lava', 1 + level * 0.3])
+  if (level >= 2) weights.push(['animal', 1 + level * 0.2])
   if (level >= 2) weights.push(['overhead', 2])
   if (level >= 2) weights.push(['car', 1.5 + level * 0.4])
   if (level >= 2) weights.push(['train', 0.6 + level * 0.2])
@@ -155,13 +194,17 @@ function spawn(s: State) {
     return
   }
   const color = Math.floor(Math.random() * CAR_COLORS.length)
-  s.obstacles.push({ kind, lane, z: -TRACK_LEN, hit: false, color })
+  s.obstacles.push({ kind, lane, z: -TRACK_LEN, hit: false, color, cross: 0, dir: Math.random() < 0.5 ? 1 : -1 })
   if (kind === 'ramp') {
     for (let i = 0; i < 4; i++) s.coins.push({ lane, z: -TRACK_LEN - 2 - i * 1.2, y: 3.2, taken: false })
   }
 }
 
-function update(s: State) {
+function animalX(o: Obstacle) {
+  return o.dir * (-3.2 + 6.4 * o.cross)
+}
+
+function update(s: State, paceMul: number) {
   if (s.status !== 'playing') return
   s.tick++
   s.x += (LANE_X[s.lane] - s.x) * 0.25
@@ -182,7 +225,7 @@ function update(s: State) {
   if (s.flash > 0) s.flash--
   if (s.fumble > 0) s.fumble--
 
-  s.speed = Math.min(0.36, 0.13 + (s.level - 1) * 0.035) * (s.fumble > 0 ? 0.35 : 1)
+  s.speed = Math.min(0.36, 0.13 + (s.level - 1) * 0.035) * (s.fumble > 0 ? 0.35 : 1) * paceMul
   s.dist += s.speed
   if (s.invuln > 0) s.invuln--
 
@@ -198,6 +241,21 @@ function update(s: State) {
 
   const playerH = s.sliding > 0 ? SLIDE_H : RUN_H
   for (const o of s.obstacles) {
+    if (o.kind === 'animal') {
+      o.cross += 0.011
+      if (o.cross >= 1) o.hit = true
+      if (!o.hit && s.invuln <= 0 && Math.abs(o.z) < 0.9 && Math.abs(animalX(o) - LANE_X[s.lane]) < 0.9 && s.py < 0.8) {
+        o.hit = true
+        s.hearts--
+        s.invuln = 130
+        if (s.hearts <= 0) {
+          s.status = 'over'
+          s.tick = -1
+          return
+        }
+      }
+      continue
+    }
     if (o.hit || o.lane !== s.lane || Math.abs(o.z) > HALF_LEN[o.kind] + PLAYER_HALF_DEPTH) continue
     if (o.kind === 'ramp') {
       if (o.lane === s.lane && Math.abs(o.z) < 0.8) {
@@ -365,6 +423,17 @@ function buildAssets() {
     }
   })
 
+  const mudTex = canvasTexture(128, 128, (ctx) => {
+    ctx.fillStyle = '#6b4a24'
+    ctx.fillRect(0, 0, 128, 128)
+    for (let i = 0; i < 260; i++) {
+      ctx.fillStyle = Math.random() < 0.5 ? 'rgba(45,30,14,0.55)' : 'rgba(150,110,60,0.45)'
+      ctx.beginPath()
+      ctx.arc(Math.random() * 128, Math.random() * 128, 1 + Math.random() * 4, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  })
+
   const lavaTex = canvasTexture(256, 256, (ctx) => {
     const g = ctx.createRadialGradient(128, 128, 20, 128, 128, 150)
     g.addColorStop(0, '#fde047')
@@ -389,7 +458,9 @@ function buildAssets() {
     woodMat: new THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.8 }),
     hazardMat: new THREE.MeshStandardMaterial({ map: hazardTex, roughness: 0.5 }),
     rampMat: new THREE.MeshStandardMaterial({ map: rampTex, roughness: 0.6 }),
-    puddleMat: new THREE.MeshStandardMaterial({ color: '#7dd3fc', roughness: 0.05, metalness: 0.2, transparent: true, opacity: 0.85 }),
+    puddleMat: new THREE.MeshStandardMaterial({ map: mudTex, color: '#a07a45', roughness: 0.95 }),
+    dogMat: new THREE.MeshStandardMaterial({ color: '#b45309', roughness: 0.8 }),
+    dogDarkMat: new THREE.MeshStandardMaterial({ color: '#451a03', roughness: 0.8 }),
     lavaMat: new THREE.MeshStandardMaterial({ map: lavaTex, emissive: '#f97316', emissiveMap: lavaTex, emissiveIntensity: 0.9, roughness: 0.4 }),
     trainMat: new THREE.MeshStandardMaterial({ map: trainWindowTex, roughness: 0.5 }),
     trainBodyMat: new THREE.MeshStandardMaterial({ color: TRAIN_COLOR, roughness: 0.5 }),
@@ -452,8 +523,23 @@ function buildAssets() {
       backpack: new THREE.BoxGeometry(0.42, 0.46, 0.16),
       ramp: buildRampGeometry(),
       disc: new THREE.CircleGeometry(1, 28),
+      mud: buildMudGeometry(),
     },
   }
+}
+
+function buildMudGeometry() {
+  const geo = new THREE.CircleGeometry(1, 40)
+  const pos = geo.attributes.position as THREE.BufferAttribute
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i)
+    const y = pos.getY(i)
+    if (x === 0 && y === 0) continue
+    const r = 0.62 + Math.random() * 0.45
+    pos.setXY(i, x * r, y * r)
+  }
+  geo.computeVertexNormals()
+  return geo
 }
 
 function buildRampGeometry() {
@@ -617,12 +703,44 @@ function makeTrain(a: Assets) {
 
 function makePuddle(a: Assets) {
   const g = new THREE.Group()
-  const disc = new THREE.Mesh(a.geo.disc, a.puddleMat)
+  const disc = new THREE.Mesh(a.geo.mud, a.puddleMat)
   disc.rotation.x = -Math.PI / 2
-  disc.scale.set(0.95, 0.6, 1)
+  disc.scale.set(1.05, 0.7, 1)
   disc.position.y = 0.02
   disc.receiveShadow = true
   g.add(disc)
+  return g
+}
+
+function makeAnimal(a: Assets) {
+  const g = new THREE.Group()
+  const body = mesh(new THREE.BoxGeometry(1.0, 0.44, 0.44), a.dogMat)
+  body.position.y = 0.66
+  const head = mesh(new THREE.BoxGeometry(0.36, 0.34, 0.34), a.dogMat)
+  head.position.set(0.62, 0.9, 0)
+  const snout = mesh(new THREE.BoxGeometry(0.2, 0.14, 0.18), a.dogDarkMat)
+  snout.position.set(0.82, 0.84, 0)
+  const ear = mesh(new THREE.BoxGeometry(0.12, 0.2, 0.1), a.dogDarkMat)
+  ear.position.set(0.58, 1.1, 0.12)
+  const ear2 = ear.clone()
+  ear2.position.z = -0.12
+  const tail = mesh(new THREE.CylinderGeometry(0.04, 0.03, 0.4, 6), a.dogDarkMat)
+  tail.position.set(-0.56, 0.95, 0)
+  tail.rotation.z = 0.8
+  g.add(body, head, snout, ear, ear2, tail)
+  const legs: THREE.Group[] = []
+  for (const x of [-0.36, 0.36]) {
+    for (const z of [-0.14, 0.14]) {
+      const leg = new THREE.Group()
+      leg.position.set(x, 0.44, z)
+      const l = mesh(new THREE.BoxGeometry(0.1, 0.44, 0.1), a.dogDarkMat)
+      l.position.y = -0.22
+      leg.add(l)
+      g.add(leg)
+      legs.push(leg)
+    }
+  }
+  g.userData.legs = legs
   return g
 }
 
@@ -673,6 +791,9 @@ function makeTree(a: Assets) {
 }
 
 export default function App() {
+  const [settings, setSettings] = useState<Settings>(() => loadSettings())
+  const [showSettings, setShowSettings] = useState(false)
+  const settingsRef = useRef(settings)
   const mountRef = useRef<HTMLDivElement>(null)
   const stateRef = useRef<State>({
     status: 'ready',
@@ -757,6 +878,44 @@ export default function App() {
       hemi.intensity = index === 3 ? 0.7 : 1.0
     }
     applyTheme(0)
+
+    const weatherSky: Record<string, THREE.Color> = {}
+    for (const key of Object.keys(WEATHER_LOOK) as Exclude<Weather, 'summer'>[]) {
+      weatherSky[key] = new THREE.Color(WEATHER_LOOK[key].sky)
+    }
+
+    const makeParticles = (count: number, color: string, size: number, opacity: number) => {
+      const positions = new Float32Array(count * 3)
+      for (let i = 0; i < count; i++) {
+        positions[i * 3] = (Math.random() - 0.5) * 12
+        positions[i * 3 + 1] = Math.random() * 10
+        positions[i * 3 + 2] = -40 + Math.random() * 46
+      }
+      const geo = new THREE.BufferGeometry()
+      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+      const points = new THREE.Points(
+        geo,
+        new THREE.PointsMaterial({ color, size, transparent: true, opacity, depthWrite: false }),
+      )
+      points.visible = false
+      scene.add(points)
+      return { points, positions, count }
+    }
+    const snow = makeParticles(500, '#ffffff', 0.14, 0.9)
+    const rain = makeParticles(600, '#bfdbfe', 0.07, 0.6)
+    let lightning = 0
+    let lastWeather = ''
+
+    const animateParticles = (p: { points: THREE.Points; positions: Float32Array; count: number }, fall: number, drift: number, speed: number) => {
+      for (let i = 0; i < p.count; i++) {
+        p.positions[i * 3 + 1] -= fall
+        p.positions[i * 3] += drift
+        p.positions[i * 3 + 2] += speed
+        if (p.positions[i * 3 + 1] < 0) p.positions[i * 3 + 1] = 10
+        if (p.positions[i * 3 + 2] > 6) p.positions[i * 3 + 2] -= 46
+      }
+      p.points.geometry.attributes.position.needsUpdate = true
+    }
 
     const grass = new THREE.Mesh(new THREE.PlaneGeometry(220, 220), a.grassMat)
     grass.rotation.x = -Math.PI / 2
@@ -871,13 +1030,14 @@ export default function App() {
     let prevTime = performance.now()
     const loop = (now: number) => {
       const body: THREE.Object3D = modelRoot ?? runner.group
+      if (mixer) mixer.timeScale = Math.max(0.4, s.speed / 0.13)
       mixer?.update(clock.getDelta())
       acc += Math.min(now - prevTime, 100)
       prevTime = now
       let steps = 0
       while (acc >= STEP && steps < 4) {
         const wasPlaying = s.status === 'playing'
-        update(s)
+        update(s, PACE_OPTIONS.find((o) => o.value === settingsRef.current.pace)?.mul ?? 1)
         if (wasPlaying && s.status === 'over') {
           const score = scoreOf(s)
           if (score > s.best) {
@@ -889,7 +1049,34 @@ export default function App() {
         steps++
       }
       if (steps === 4) acc = 0
+      const cfg = settingsRef.current
+      if (cfg.weather !== lastWeather) {
+        lastWeather = cfg.weather
+        currentTheme = -1
+      }
       applyTheme(s.level - 1)
+      const look = cfg.weather === 'summer' ? null : WEATHER_LOOK[cfg.weather]
+      snow.points.visible = cfg.weather === 'winter'
+      rain.points.visible = cfg.weather === 'stormy'
+      if (look) {
+        scene.background = weatherSky[cfg.weather]
+        ;(scene.fog as THREE.Fog).color.set(look.fog)
+        ;(scene.fog as THREE.Fog).near = look.near
+        ;(scene.fog as THREE.Fog).far = look.far
+        a.grassMat.color.set(look.grass)
+        sun.intensity = look.sun
+        hemi.intensity = look.hemi
+        if (cfg.weather === 'stormy') {
+          if (lightning === 0 && Math.random() < 0.004) lightning = 8
+          if (lightning > 0) {
+            lightning--
+            sun.intensity = 3.2
+            hemi.intensity = 1.6
+          }
+        }
+      }
+      if (snow.points.visible) animateParticles(snow, 0.03, 0.004, s.speed)
+      if (rain.points.visible) animateParticles(rain, 0.3, 0, s.speed)
 
       body.position.x = s.x
       body.position.y = s.py
@@ -949,11 +1136,21 @@ export default function App() {
           else if (o.kind === 'train') m = makeTrain(a)
           else if (o.kind === 'puddle') m = makePuddle(a)
           else if (o.kind === 'lava') m = makeLava(a)
+          else if (o.kind === 'animal') m = makeAnimal(a)
           else m = makeRamp(a)
           scene.add(m)
           obstacleMeshes.set(o, m)
         }
-        m.position.set(LANE_X[o.lane] + offsetAt(s.dist, o.z), 0, o.z)
+        if (o.kind === 'animal') {
+          m.position.set(animalX(o) + offsetAt(s.dist, o.z), 0, o.z)
+          m.rotation.y = o.dir > 0 ? Math.PI / 2 : -Math.PI / 2
+          const legs = (m.userData.legs as THREE.Group[] | undefined) ?? []
+          legs.forEach((leg, i) => {
+            leg.rotation.z = Math.sin(s.tick * 0.5 + (i % 2 ? Math.PI : 0)) * 0.6
+          })
+        } else {
+          m.position.set(LANE_X[o.lane] + offsetAt(s.dist, o.z), 0, o.z)
+        }
       }
       for (const [o, m] of obstacleMeshes) {
         if (!s.obstacles.includes(o)) {
@@ -1041,6 +1238,11 @@ export default function App() {
     }
   }, [])
 
+  useEffect(() => {
+    settingsRef.current = settings
+    saveSettings(settings)
+  }, [settings])
+
   const press = (action: Action) => (e: React.PointerEvent) => {
     e.preventDefault()
     act(stateRef.current, action)
@@ -1125,6 +1327,62 @@ export default function App() {
                   <span className="rounded-full bg-white text-slate-900 px-6 py-3 font-bold">Play again</span>
                 </>
               )}
+              <button
+                type="button"
+                onPointerDown={(e) => {
+                  e.stopPropagation()
+                  setShowSettings(true)
+                }}
+                className="mt-4 rounded-full border-2 border-white/80 px-5 py-2 text-sm font-bold"
+              >
+                Settings
+              </button>
+            </div>
+          )}
+
+          {showSettings && (
+            <div
+              className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-5 rounded-3xl bg-slate-900/85 text-white p-6"
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <h2 className="text-2xl font-extrabold">Settings</h2>
+              <div className="w-full">
+                <p className="text-sm font-bold mb-2 text-center">Weather</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {WEATHER_OPTIONS.map((o) => (
+                    <button
+                      key={o.value}
+                      type="button"
+                      onPointerDown={() => setSettings((c) => ({ ...c, weather: o.value }))}
+                      className={`rounded-xl py-3 font-bold ${settings.weather === o.value ? 'bg-white text-slate-900' : 'bg-white/20'}`}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="w-full">
+                <p className="text-sm font-bold mb-2 text-center">Speed</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {PACE_OPTIONS.map((o) => (
+                    <button
+                      key={o.value}
+                      type="button"
+                      onPointerDown={() => setSettings((c) => ({ ...c, pace: o.value }))}
+                      className={`rounded-xl py-3 font-bold ${settings.pace === o.value ? 'bg-white text-slate-900' : 'bg-white/20'}`}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <button
+                type="button"
+                onPointerDown={() => setShowSettings(false)}
+                className="rounded-full bg-pink-500 px-8 py-3 font-bold"
+              >
+                Done
+              </button>
             </div>
           )}
         </div>
