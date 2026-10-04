@@ -910,7 +910,7 @@ export default function App() {
         body.rotation.z = 0
       }
       const sliding = s.sliding > 0
-      const targetTilt = sliding ? -1.4 : 0
+      const targetTilt = sliding ? 1.4 : 0
       body.rotation.x += (targetTilt - body.rotation.x) * 0.3
       body.position.y = s.py + (sliding ? 0.38 : 0) * (1 - Math.abs(body.rotation.x) / 1.4)
       runner.torso.scale.y = 1
