@@ -52,7 +52,7 @@ const ROAD_HALF = 2.8
 const LEVEL_DIST = [0, 700, 1600, 2600, 3800]
 
 type Status = 'ready' | 'playing' | 'over'
-type Kind = 'crate' | 'overhead' | 'car' | 'train' | 'ramp' | 'puddle' | 'lava' | 'animal'
+type Kind = 'crate' | 'overhead' | 'car' | 'train' | 'ramp' | 'puddle' | 'lava' | 'animal' | 'speed' | 'jump'
 type Obstacle = { kind: Kind; lane: number; z: number; hit: boolean; color: number; cross: number; dir: number }
 type Coin = { lane: number; z: number; y: number; taken: boolean }
 type Action = 'left' | 'right' | 'jump' | 'slide'
@@ -77,6 +77,8 @@ type State = {
   level: number
   flash: number
   fumble: number
+  speedBoost: number
+  jumpBoost: number
 }
 
 const THEMES = [
@@ -92,7 +94,7 @@ const TRAIN_COLOR = 0x22d3ee
 
 const NEEDED_HEIGHT: Partial<Record<Kind, number>> = { crate: 0.5, lava: 0.5, car: 3.0, train: 3.4 }
 const PLAYER_HALF_DEPTH = 0.2
-const HALF_LEN: Record<Kind, number> = { crate: 0.35, overhead: 0.5, car: 1.1, train: 3.0, ramp: 0.8, puddle: 0.8, lava: 0.9, animal: 0.6 }
+const HALF_LEN: Record<Kind, number> = { crate: 0.35, overhead: 0.5, car: 1.1, train: 3.0, ramp: 0.8, puddle: 0.8, lava: 0.9, animal: 0.6, speed: 0.6, jump: 0.6 }
 const FUMBLE_FRAMES = 150
 
 function bend(p: number) {
@@ -147,6 +149,8 @@ function reset(s: State) {
     level: 1,
     flash: 0,
     fumble: 0,
+    speedBoost: 0,
+    jumpBoost: 0,
   })
 }
 
@@ -159,7 +163,7 @@ function act(s: State, a: Action) {
   if (a === 'left') s.lane = Math.max(0, s.lane - 1)
   if (a === 'right') s.lane = Math.min(2, s.lane + 1)
   if (a === 'jump' && s.py <= 0) {
-    s.vy = JUMP_V
+    s.vy = JUMP_V * (s.jumpBoost > 0 ? 0.93 : 1)
     s.sliding = 0
   }
   if (a === 'slide' && s.py <= 0) s.sliding = 45
@@ -174,6 +178,8 @@ function pickKind(level: number): Kind | 'coins' {
   weights.push(['puddle', 2])
   if (level >= 2) weights.push(['lava', 1 + level * 0.3])
   if (level >= 2) weights.push(['animal', 1 + level * 0.2])
+  weights.push(['speed', 0.6])
+  weights.push(['jump', 0.6])
   if (level >= 2) weights.push(['overhead', 2])
   if (level >= 2) weights.push(['car', 1.5 + level * 0.4])
   if (level >= 2) weights.push(['train', 0.6 + level * 0.2])
@@ -209,7 +215,7 @@ function update(s: State, paceMul: number) {
   s.tick++
   s.x += (LANE_X[s.lane] - s.x) * 0.25
 
-  s.vy -= GRAVITY
+  s.vy -= GRAVITY * (s.jumpBoost > 0 ? 0.62 : 1)
   s.py += s.vy
   if (s.py <= 0) {
     s.py = 0
@@ -224,8 +230,10 @@ function update(s: State, paceMul: number) {
   }
   if (s.flash > 0) s.flash--
   if (s.fumble > 0) s.fumble--
+  if (s.speedBoost > 0) s.speedBoost--
+  if (s.jumpBoost > 0) s.jumpBoost--
 
-  s.speed = Math.min(0.36, 0.13 + (s.level - 1) * 0.035) * (s.fumble > 0 ? 0.35 : 1) * paceMul
+  s.speed = Math.min(0.36, 0.13 + (s.level - 1) * 0.035) * (s.fumble > 0 ? 0.35 : 1) * (s.speedBoost > 0 ? 1.5 : 1) * paceMul
   s.dist += s.speed
   if (s.invuln > 0) s.invuln--
 
@@ -241,6 +249,14 @@ function update(s: State, paceMul: number) {
 
   const playerH = s.sliding > 0 ? SLIDE_H : RUN_H
   for (const o of s.obstacles) {
+    if (o.kind === 'speed' || o.kind === 'jump') {
+      if (!o.hit && o.lane === s.lane && Math.abs(o.z) < 0.9 && s.py < 2.2) {
+        o.hit = true
+        if (o.kind === 'speed') s.speedBoost = 240
+        else s.jumpBoost = 480
+      }
+      continue
+    }
     if (o.kind === 'animal') {
       o.cross += 0.011
       if (o.cross >= 1) o.hit = true
@@ -459,6 +475,10 @@ function buildAssets() {
     hazardMat: new THREE.MeshStandardMaterial({ map: hazardTex, roughness: 0.5 }),
     rampMat: new THREE.MeshStandardMaterial({ map: rampTex, roughness: 0.6 }),
     puddleMat: new THREE.MeshStandardMaterial({ map: mudTex, color: '#a07a45', roughness: 0.95 }),
+    speedMat: new THREE.MeshStandardMaterial({ color: '#fde047', emissive: '#f59e0b', emissiveIntensity: 0.8, metalness: 0.4, roughness: 0.2 }),
+    stemMat: new THREE.MeshStandardMaterial({ color: '#f5f5f4', roughness: 0.5 }),
+    capMat: new THREE.MeshStandardMaterial({ color: '#22c55e', emissive: '#14532d', emissiveIntensity: 0.4, roughness: 0.5 }),
+    dotMat: new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.4 }),
     dogMat: new THREE.MeshStandardMaterial({ color: '#b45309', roughness: 0.8 }),
     dogDarkMat: new THREE.MeshStandardMaterial({ color: '#451a03', roughness: 0.8 }),
     lavaMat: new THREE.MeshStandardMaterial({ map: lavaTex, emissive: '#f97316', emissiveMap: lavaTex, emissiveIntensity: 0.9, roughness: 0.4 }),
@@ -522,6 +542,10 @@ function buildAssets() {
       shoe: new THREE.SphereGeometry(0.17, 16, 12),
       backpack: new THREE.BoxGeometry(0.42, 0.46, 0.16),
       ramp: buildRampGeometry(),
+      gem: new THREE.OctahedronGeometry(0.38),
+      stem: new THREE.CylinderGeometry(0.16, 0.2, 0.9, 12),
+      cap: new THREE.SphereGeometry(0.42, 16, 12),
+      dot: new THREE.SphereGeometry(0.07, 8, 6),
       disc: new THREE.CircleGeometry(1, 28),
       mud: buildMudGeometry(),
     },
@@ -744,6 +768,30 @@ function makeAnimal(a: Assets) {
   return g
 }
 
+function makeSpeedPickup(a: Assets) {
+  const g = new THREE.Group()
+  const gem = mesh(a.geo.gem, a.speedMat, false)
+  gem.position.y = 1.0
+  g.add(gem)
+  return g
+}
+
+function makeJumpPickup(a: Assets) {
+  const g = new THREE.Group()
+  const stem = mesh(a.geo.stem, a.stemMat, false)
+  stem.position.y = 0.45
+  const cap = mesh(a.geo.cap, a.capMat, false)
+  cap.position.y = 0.95
+  cap.scale.set(1, 0.6, 1)
+  g.add(stem, cap)
+  for (const [x, z] of [[0.2, 0.1], [-0.15, 0.2], [0.05, -0.2]]) {
+    const dot = mesh(a.geo.dot, a.dotMat, false)
+    dot.position.set(x, 1.12, z)
+    g.add(dot)
+  }
+  return g
+}
+
 function makeLava(a: Assets) {
   const g = new THREE.Group()
   const disc = new THREE.Mesh(a.geo.disc, a.lavaMat)
@@ -815,6 +863,8 @@ export default function App() {
     level: 1,
     flash: 0,
     fumble: 0,
+    speedBoost: 0,
+    jumpBoost: 0,
   })
   const [hud, setHud] = useState({
     status: 'ready' as Status,
@@ -824,6 +874,8 @@ export default function App() {
     best: stateRef.current.best,
     level: 1,
     flash: 0,
+    speedOn: false,
+    jumpOn: false,
   })
 
   useEffect(() => {
@@ -1023,7 +1075,7 @@ export default function App() {
 
     let frame = 0
     let camX = 0
-    let last = { score: -1, coins: -1, hearts: -1, status: '' as Status, level: 0, flash: 0 }
+    let last = { score: -1, coins: -1, hearts: -1, status: '' as Status, level: 0, flash: 0, speedOn: false, jumpOn: false }
 
     const STEP = 1000 / 60
     let acc = 0
@@ -1058,6 +1110,10 @@ export default function App() {
       const look = cfg.weather === 'summer' ? null : WEATHER_LOOK[cfg.weather]
       snow.points.visible = cfg.weather === 'winter'
       rain.points.visible = cfg.weather === 'stormy'
+      if (!look) {
+        ;(scene.fog as THREE.Fog).near = 40
+        ;(scene.fog as THREE.Fog).far = 95
+      }
       if (look) {
         scene.background = weatherSky[cfg.weather]
         ;(scene.fog as THREE.Fog).color.set(look.fog)
@@ -1137,11 +1193,16 @@ export default function App() {
           else if (o.kind === 'puddle') m = makePuddle(a)
           else if (o.kind === 'lava') m = makeLava(a)
           else if (o.kind === 'animal') m = makeAnimal(a)
+          else if (o.kind === 'speed') m = makeSpeedPickup(a)
+          else if (o.kind === 'jump') m = makeJumpPickup(a)
           else m = makeRamp(a)
           scene.add(m)
           obstacleMeshes.set(o, m)
         }
-        if (o.kind === 'animal') {
+        if (o.kind === 'speed' || o.kind === 'jump') {
+          m.position.set(LANE_X[o.lane] + offsetAt(s.dist, o.z), 0, o.z)
+          m.rotation.y += 0.06
+        } else if (o.kind === 'animal') {
           m.position.set(animalX(o) + offsetAt(s.dist, o.z), 0, o.z)
           m.rotation.y = o.dir > 0 ? Math.PI / 2 : -Math.PI / 2
           const legs = (m.userData.legs as THREE.Group[] | undefined) ?? []
@@ -1192,9 +1253,11 @@ export default function App() {
         s.hearts !== last.hearts ||
         s.status !== last.status ||
         s.level !== last.level ||
-        flashOn !== last.flash
+        flashOn !== last.flash ||
+        (s.speedBoost > 0) !== (last.speedOn ?? false) ||
+        (s.jumpBoost > 0) !== (last.jumpOn ?? false)
       ) {
-        last = { score, coins: s.coinCount, hearts: s.hearts, status: s.status, level: s.level, flash: flashOn }
+        last = { score, coins: s.coinCount, hearts: s.hearts, status: s.status, level: s.level, flash: flashOn, speedOn: s.speedBoost > 0, jumpOn: s.jumpBoost > 0 }
         setHud({
           status: s.status,
           score,
@@ -1203,6 +1266,8 @@ export default function App() {
           best: s.best,
           level: s.level,
           flash: flashOn,
+          speedOn: s.speedBoost > 0,
+          jumpOn: s.jumpBoost > 0,
         })
       }
       frame = requestAnimationFrame(loop)
@@ -1296,6 +1361,12 @@ export default function App() {
           <span>Coins {hud.coins}</span>
           <span className="text-pink-500">{'♥'.repeat(hud.hearts) || '·'}</span>
         </div>
+        {(hud.speedOn || hud.jumpOn) && (
+          <div className="flex justify-center gap-2 mb-2 text-xs font-bold">
+            {hud.speedOn && <span className="rounded-full bg-yellow-300 px-3 py-1 text-slate-900">Speed boost</span>}
+            {hud.jumpOn && <span className="rounded-full bg-green-400 px-3 py-1 text-slate-900">Super jump</span>}
+          </div>
+        )}
         <div className="text-center text-sm font-bold text-slate-600 mb-2">
           Level {hud.level} · {THEMES[hud.level - 1].name}
         </div>
