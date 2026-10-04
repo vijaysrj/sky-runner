@@ -51,6 +51,22 @@ function saveSettings(settings: Settings) {
 const TRACK_LEN = 90
 const ROAD_HALF = 2.8
 const LEVEL_DIST = [0, 700, 1600, 2600, 3800]
+const LEVEL_KEY = 'runner-level'
+
+function loadLevel() {
+  try {
+    const n = Number(localStorage.getItem(LEVEL_KEY))
+    return n >= 1 && n <= LEVEL_DIST.length ? n : 1
+  } catch {
+    return 1
+  }
+}
+
+function saveLevel(n: number) {
+  try {
+    localStorage.setItem(LEVEL_KEY, String(n))
+  } catch {}
+}
 
 type Status = 'ready' | 'playing' | 'over'
 type Kind = 'crate' | 'overhead' | 'car' | 'train' | 'ramp' | 'puddle' | 'lava' | 'animal' | 'speed' | 'jump'
@@ -131,6 +147,7 @@ function scoreOf(s: State) {
 }
 
 function reset(s: State) {
+  const startLevel = loadLevel()
   Object.assign(s, {
     status: 'playing',
     lane: 1,
@@ -141,13 +158,13 @@ function reset(s: State) {
     obstacles: [],
     coins: [],
     speed: 0.13,
-    dist: 0,
+    dist: LEVEL_DIST[startLevel - 1],
     coinCount: 0,
     hearts: 3,
     invuln: 0,
     nextSpawn: 50,
     tick: 0,
-    level: 1,
+    level: startLevel,
     flash: 0,
     fumble: 0,
     speedBoost: 0,
@@ -230,6 +247,7 @@ function update(s: State, paceMul: number) {
   const level = levelOf(s.dist)
   if (level !== s.level) {
     s.level = level
+    saveLevel(Math.max(level, loadLevel()))
     s.flash = 150
   }
   if (s.flash > 0) s.flash--
@@ -1420,7 +1438,7 @@ export default function App() {
               {hud.status === 'ready' ? (
                 <>
                   <h1 className="text-3xl font-extrabold mb-2">Sky Runner</h1>
-                  <p className="text-lg mb-6">Tap the screen to start</p>
+                  <p className="text-lg mb-6">{loadLevel() > 1 ? `Continue from Level ${loadLevel()}` : 'Tap the screen to start'}</p>
                 </>
               ) : (
                 <>
@@ -1480,6 +1498,13 @@ export default function App() {
                   ))}
                 </div>
               </div>
+              <button
+                type="button"
+                onPointerDown={() => saveLevel(1)}
+                className="rounded-full border border-white/70 px-6 py-2 text-sm font-bold"
+              >
+                Start again from Level 1
+              </button>
               <button
                 type="button"
                 onPointerDown={() => setShowSettings(false)}
