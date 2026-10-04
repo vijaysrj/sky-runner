@@ -808,6 +808,7 @@ export default function App() {
     const runner = makeRunner(a)
     scene.add(runner.group)
 
+
     let modelRoot: THREE.Group | null = null
     let mixer: THREE.AnimationMixer | null = null
     const clock = new THREE.Clock()
