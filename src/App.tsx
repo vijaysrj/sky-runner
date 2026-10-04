@@ -202,6 +202,9 @@ function spawn(s: State) {
   }
   const color = Math.floor(Math.random() * CAR_COLORS.length)
   s.obstacles.push({ kind, lane, z: -TRACK_LEN, hit: false, color, cross: 0, dir: Math.random() < 0.5 ? 1 : -1 })
+  if ((kind === 'car' || kind === 'train') && Math.random() < 0.6) {
+    s.obstacles.push({ kind: 'jump', lane, z: -TRACK_LEN - 10, hit: false, color: 0, cross: 0, dir: 1 })
+  }
   if (kind === 'ramp') {
     for (let i = 0; i < 4; i++) s.coins.push({ lane, z: -TRACK_LEN - 2 - i * 1.2, y: 3.2, taken: false })
   }
