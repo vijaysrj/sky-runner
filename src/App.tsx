@@ -771,9 +771,12 @@ export default function App() {
       runner.armL.rotation.x = -swing * 0.6
       runner.armR.rotation.x = swing * 0.6
       const sliding = s.sliding > 0
-      runner.torso.scale.y = sliding ? 0.55 : 1
-      runner.torso.position.y = sliding ? 0.9 : 1.2
-      runner.headGroup.position.y = sliding ? 1.35 : 1.85
+      const targetTilt = sliding ? -1.4 : 0
+      runner.group.rotation.x += (targetTilt - runner.group.rotation.x) * 0.3
+      runner.group.position.y = s.py + (sliding ? 0.38 : 0) * (1 - Math.abs(runner.group.rotation.x) / 1.4)
+      runner.torso.scale.y = 1
+      runner.torso.position.y = 1.2
+      runner.headGroup.position.y = 1.85
       runner.group.visible = !(s.invuln > 0 && Math.floor(s.tick / 5) % 2 === 0)
 
       a.roadMat.map!.offset.y = (s.dist / 8) % 1
