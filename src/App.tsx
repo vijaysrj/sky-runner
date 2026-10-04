@@ -54,6 +54,14 @@ const NEEDED_HEIGHT: Partial<Record<Kind, number>> = { crate: 0.5, car: 1.9, tra
 const PLAYER_HALF_DEPTH = 0.2
 const HALF_LEN: Record<Kind, number> = { crate: 0.35, overhead: 0.5, car: 1.1, train: 3.0, ramp: 0.8 }
 
+function bend(p: number) {
+  return 1.6 * Math.sin(p * 0.0045) + 0.7 * Math.sin(p * 0.013 + 1.3)
+}
+
+function offsetAt(dist: number, z: number) {
+  return bend(dist - z) - bend(dist)
+}
+
 function levelOf(dist: number) {
   let level = 1
   for (let i = 1; i < LEVEL_DIST.length; i++) if (dist >= LEVEL_DIST[i]) level = i + 1
@@ -696,24 +704,36 @@ export default function App() {
     grass.receiveShadow = true
     scene.add(grass)
 
-    const road = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_HALF * 2, 220), a.roadMat)
+    const roadGeo = new THREE.PlaneGeometry(ROAD_HALF * 2, 220, 1, 110)
+    const roadPos = roadGeo.attributes.position as THREE.BufferAttribute
+    const roadBaseX = Float32Array.from({ length: roadPos.count }, (_, i) => roadPos.getX(i))
+    const roadLocalY = Float32Array.from({ length: roadPos.count }, (_, i) => roadPos.getY(i))
+    const road = new THREE.Mesh(roadGeo, a.roadMat)
     road.rotation.x = -Math.PI / 2
     road.receiveShadow = true
     scene.add(road)
 
+    const CURB_SEG = 24
+    const CURB_LEN = 10
+    const curbs: { mesh: THREE.Mesh; side: number; z: number }[] = []
     for (const side of [-1, 1]) {
-      const curb = mesh(new THREE.BoxGeometry(0.3, 0.14, 220), a.curbMat)
-      curb.position.set(side * (ROAD_HALF + 0.15), 0.07, 0)
-      scene.add(curb)
+      for (let i = 0; i < CURB_SEG; i++) {
+        const curb = mesh(new THREE.BoxGeometry(0.3, 0.14, CURB_LEN), a.curbMat)
+        const z = -120 + i * CURB_LEN
+        curb.position.set(side * (ROAD_HALF + 0.15), 0.07, z)
+        scene.add(curb)
+        curbs.push({ mesh: curb, side, z })
+      }
     }
 
-    const trees: THREE.Group[] = []
+    const trees: { group: THREE.Group; baseX: number }[] = []
     for (const side of [-1, 1]) {
       for (let z = -TRACK_LEN; z < 10; z += 7) {
         const t = makeTree(a)
-        t.position.set(side * (5.6 + Math.random() * 1.6), 0, z + Math.random() * 2)
+        const baseX = side * (5.6 + Math.random() * 1.6)
+        t.position.set(baseX, 0, z + Math.random() * 2)
         scene.add(t)
-        trees.push(t)
+        trees.push({ group: t, baseX })
       }
     }
 
@@ -780,10 +800,19 @@ export default function App() {
       runner.group.visible = !(s.invuln > 0 && Math.floor(s.tick / 5) % 2 === 0)
 
       a.roadMat.map!.offset.y = (s.dist / 8) % 1
-      a.curbMat.map!.offset.y = (s.dist / 1.2) % 1
+      for (let i = 0; i < roadPos.count; i++) {
+        roadPos.setX(i, roadBaseX[i] + offsetAt(s.dist, -roadLocalY[i]))
+      }
+      roadPos.needsUpdate = true
+      for (const c of curbs) {
+        c.z += s.speed
+        if (c.z > 14) c.z -= CURB_SEG * CURB_LEN
+        c.mesh.position.set(c.side * (ROAD_HALF + 0.15) + offsetAt(s.dist, c.z), 0.07, c.z)
+      }
       for (const t of trees) {
-        t.position.z += s.speed
-        if (t.position.z > 8) t.position.z -= TRACK_LEN + 10
+        t.group.position.z += s.speed
+        if (t.group.position.z > 8) t.group.position.z -= TRACK_LEN + 10
+        t.group.position.x = t.baseX + offsetAt(s.dist, t.group.position.z)
       }
       for (const c of clouds) {
         c.position.x -= 0.004
@@ -801,7 +830,7 @@ export default function App() {
           scene.add(m)
           obstacleMeshes.set(o, m)
         }
-        m.position.set(LANE_X[o.lane], 0, o.z)
+        m.position.set(LANE_X[o.lane] + offsetAt(s.dist, o.z), 0, o.z)
       }
       for (const [o, m] of obstacleMeshes) {
         if (!s.obstacles.includes(o)) {
@@ -817,7 +846,7 @@ export default function App() {
           scene.add(m)
           coinMeshes.set(c, m)
         }
-        m.position.set(LANE_X[c.lane], c.y, c.z)
+        m.position.set(LANE_X[c.lane] + offsetAt(s.dist, c.z), c.y, c.z)
         m.rotation.y += 0.08
       }
       for (const [c, m] of coinMeshes) {
@@ -829,7 +858,7 @@ export default function App() {
 
       camX += (s.x * 0.5 - camX) * 0.15
       camera.position.set(camX, 4.2, 9.5)
-      camera.lookAt(camX * 0.6, 1.2, -8)
+      camera.lookAt(camX * 0.6 + offsetAt(s.dist, -8) * 0.5, 1.2, -8)
       sun.position.x = camX + 5
       sun.target.position.x = camX * 0.5
 
