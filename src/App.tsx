@@ -8,6 +8,7 @@ const SLIDE_H = 0.8
 const GRAVITY = 0.00623
 const JUMP_V = 0.187
 const RAMP_HEIGHT = 0.9
+const RAMP_LAUNCH = 0.15
 const BEST_KEY = 'runner-best'
 const SETTINGS_KEY = 'runner-settings'
 
@@ -282,6 +283,7 @@ function update(s: State, paceMul: number) {
           s.sliding = 0
         }
       } else if (o.z >= 0.8) {
+        if (o.lane === s.lane && s.py >= RAMP_HEIGHT - 0.1) s.vy = RAMP_LAUNCH
         o.hit = true
       }
       continue
