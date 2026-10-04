@@ -181,7 +181,7 @@ function act(s: State, a: Action) {
   if (a === 'left') s.lane = Math.max(0, s.lane - 1)
   if (a === 'right') s.lane = Math.min(2, s.lane + 1)
   if (a === 'jump' && s.py <= 0) {
-    s.vy = JUMP_V * (s.jumpBoost > 0 ? 0.93 : 1)
+    s.vy = JUMP_V
     s.sliding = 0
   }
   if (a === 'slide' && s.py <= 0) s.sliding = 45
@@ -236,7 +236,7 @@ function update(s: State, paceMul: number) {
   s.tick++
   s.x += (LANE_X[s.lane] - s.x) * 0.25
 
-  s.vy -= GRAVITY * (s.jumpBoost > 0 ? 0.62 : 1)
+  s.vy -= GRAVITY * (s.jumpBoost > 0 ? 0.6 : 1)
   s.py += s.vy
   if (s.py <= 0) {
     s.py = 0
