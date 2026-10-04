@@ -5,8 +5,8 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
 const LANE_X = [-1.7, 0, 1.7]
 const RUN_H = 1.7
 const SLIDE_H = 0.8
-const GRAVITY = 0.0105
-const JUMP_V = 0.22
+const GRAVITY = 0.00623
+const JUMP_V = 0.187
 const RAMP_HEIGHT = 0.9
 const BEST_KEY = 'runner-best'
 const SETTINGS_KEY = 'runner-settings'
@@ -90,7 +90,7 @@ const THEMES = [
 const CAR_COLORS = [0xf472b6, 0xa855f7, 0x38bdf8, 0xfacc15]
 const TRAIN_COLOR = 0x22d3ee
 
-const NEEDED_HEIGHT: Partial<Record<Kind, number>> = { crate: 0.5, lava: 0.5, car: 2.6, train: 2.7 }
+const NEEDED_HEIGHT: Partial<Record<Kind, number>> = { crate: 0.5, lava: 0.5, car: 3.0, train: 3.4 }
 const PLAYER_HALF_DEPTH = 0.2
 const HALF_LEN: Record<Kind, number> = { crate: 0.35, overhead: 0.5, car: 1.1, train: 3.0, ramp: 0.8, puddle: 0.8, lava: 0.9, animal: 0.6 }
 const FUMBLE_FRAMES = 150
@@ -1253,7 +1253,6 @@ export default function App() {
   function onSurfaceDown(e: React.PointerEvent<HTMLDivElement>) {
     swipeStart.current = { x: e.clientX, y: e.clientY }
     e.currentTarget.setPointerCapture(e.pointerId)
-    act(stateRef.current, 'jump')
   }
 
   function onSurfaceMove(e: React.PointerEvent<HTMLDivElement>) {
@@ -1265,14 +1264,18 @@ export default function App() {
     const THRESHOLD = 26
     if (Math.abs(dx) >= THRESHOLD && Math.abs(dx) > Math.abs(dy)) {
       act(s, dx < 0 ? 'left' : 'right')
-      swipeStart.current = { x: e.clientX, y: e.clientY }
+      swipeStart.current = null
     } else if (dy >= THRESHOLD && dy > Math.abs(dx)) {
       act(s, 'slide')
+      swipeStart.current = null
+    } else if (dy <= -THRESHOLD && -dy > Math.abs(dx)) {
+      act(s, 'jump')
       swipeStart.current = null
     }
   }
 
   function onSurfaceUp() {
+    if (swipeStart.current) act(stateRef.current, 'jump')
     swipeStart.current = null
   }
 
