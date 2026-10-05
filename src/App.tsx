@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
+import { sfx, setMusic, setSfx, startMusic, stopMusic } from './audio'
 
 const LANE_X = [-1.7, 0, 1.7]
 const RUN_H = 1.7
@@ -13,7 +14,7 @@ const SETTINGS_KEY = 'runner-settings'
 
 type Weather = 'summer' | 'winter' | 'stormy' | 'fog'
 type Pace = 'relaxed' | 'normal' | 'fast'
-type Settings = { weather: Weather; pace: Pace }
+type Settings = { weather: Weather; pace: Pace; music: boolean; sound: boolean }
 
 const WEATHER_OPTIONS: { value: Weather; label: string }[] = [
   { value: 'summer', label: 'Summer' },
@@ -26,7 +27,7 @@ const PACE_OPTIONS: { value: Pace; label: string; mul: number }[] = [
   { value: 'normal', label: 'Normal', mul: 1 },
   { value: 'fast', label: 'Fast', mul: 1.6 },
 ]
-const defaultSettings: Settings = { weather: 'summer', pace: 'normal' }
+const defaultSettings: Settings = { weather: 'summer', pace: 'normal', music: true, sound: true }
 
 const WEATHER_LOOK: Record<Exclude<Weather, 'summer'>, { sky: string; fog: string; grass: string; sun: number; hemi: number; near: number; far: number }> = {
   winter: { sky: '#dbeafe', fog: '#e2e8f0', grass: '#f8fafc', sun: 1.4, hemi: 0.9, near: 30, far: 80 },
@@ -149,6 +150,7 @@ function scoreOf(s: State) {
 
 function reset(s: State) {
   const startLevel = loadLevel()
+  startMusic()
   Object.assign(s, {
     status: 'playing',
     lane: 1,
@@ -184,6 +186,7 @@ function act(s: State, a: Action) {
   if (a === 'left') s.lane = Math.max(0, s.lane - 1)
   if (a === 'right') s.lane = Math.min(2, s.lane + 1)
   if (a === 'jump' && s.py <= 0) {
+    sfx('jump')
     s.vy = JUMP_V
     s.sliding = 0
   }
@@ -1200,6 +1203,11 @@ export default function App() {
 
     let frame = 0
     let camX = 0
+    let prevCoins = 0
+    let prevHearts = 3
+    let prevSpeed = 0
+    let prevJump = 0
+    let prevFumble = 0
     let last = { score: -1, coins: -1, hearts: -1, status: '' as Status, level: 0, flash: 0, speedOn: false, jumpOn: false, loaded: false }
 
     const STEP = 1000 / 60
@@ -1216,7 +1224,19 @@ export default function App() {
       while (acc >= STEP && steps < 4 && !pausedRef.current) {
         const wasPlaying = s.status === 'playing'
         update(s, PACE_OPTIONS.find((o) => o.value === settingsRef.current.pace)?.mul ?? 1)
+        if (s.coinCount > prevCoins) sfx('coin')
+        if (s.hearts < prevHearts) sfx('hit')
+        if (s.speedBoost > 0 && prevSpeed === 0) sfx('boost')
+        if (s.jumpBoost > 0 && prevJump === 0) sfx('boost')
+        if (s.fumble > 0 && prevFumble === 0) sfx('splash')
+        prevCoins = s.coinCount
+        prevHearts = s.hearts
+        prevSpeed = s.speedBoost
+        prevJump = s.jumpBoost
+        prevFumble = s.fumble
         if (wasPlaying && s.status === 'over') {
+          stopMusic()
+          sfx('over')
           s.failLevel = s.level
           const score = scoreOf(s)
           if (score > s.best) {
@@ -1455,6 +1475,12 @@ export default function App() {
   }, [showSettings])
 
   useEffect(() => {
+    setMusic(settings.music)
+    setSfx(settings.sound)
+    if (settings.music && stateRef.current.status === 'playing') startMusic()
+  }, [settings.music, settings.sound])
+
+  useEffect(() => {
     settingsRef.current = settings
     saveSettings(settings)
   }, [settings])
@@ -1648,6 +1674,20 @@ export default function App() {
                   ))}
                 </div>
               </div>
+              <button
+                type="button"
+                onPointerDown={() => setSettings((c) => ({ ...c, music: !c.music }))}
+                className="rounded-full border border-white/70 px-6 py-2 text-sm font-bold"
+              >
+                Music: {settings.music ? 'On' : 'Off'}
+              </button>
+              <button
+                type="button"
+                onPointerDown={() => setSettings((c) => ({ ...c, sound: !c.sound }))}
+                className="rounded-full border border-white/70 px-6 py-2 text-sm font-bold"
+              >
+                Sound effects: {settings.sound ? 'On' : 'Off'}
+              </button>
               <button
                 type="button"
                 onPointerDown={() => saveLevel(1)}
