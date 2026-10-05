@@ -526,6 +526,10 @@ function buildAssets() {
     birdMat: new THREE.MeshStandardMaterial({ color: '#334155', roughness: 0.7 }),
     spikeMat: new THREE.MeshStandardMaterial({ color: '#94a3b8', metalness: 0.6, roughness: 0.3 }),
     wallMat: new THREE.MeshStandardMaterial({ color: '#9a3412', roughness: 0.9 }),
+    pineMat: new THREE.MeshStandardMaterial({ color: '#166534', roughness: 0.8 }),
+    bushMats: ['#4ade80', '#f472b6', '#fde047'].map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.85 })),
+    rockMat: new THREE.MeshStandardMaterial({ color: '#94a3b8', roughness: 0.95 }),
+    buildingMats: ['#fb7185', '#fbbf24', '#38bdf8', '#a78bfa'].map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.6 })),
     dogMat: new THREE.MeshStandardMaterial({ color: '#b45309', roughness: 0.8 }),
     dogDarkMat: new THREE.MeshStandardMaterial({ color: '#451a03', roughness: 0.8 }),
     lavaMat: new THREE.MeshStandardMaterial({ map: lavaTex, emissive: '#f97316', emissiveMap: lavaTex, emissiveIntensity: 0.9, roughness: 0.4 }),
@@ -593,6 +597,9 @@ function buildAssets() {
       stem: new THREE.CylinderGeometry(0.16, 0.2, 0.9, 12),
       cap: new THREE.SphereGeometry(0.42, 16, 12),
       dot: new THREE.SphereGeometry(0.07, 8, 6),
+      pineCone: new THREE.ConeGeometry(0.7, 1.2, 10),
+      bush: new THREE.SphereGeometry(0.45, 12, 10),
+      rock: new THREE.DodecahedronGeometry(0.45, 0),
       disc: new THREE.CircleGeometry(1, 28),
       mud: buildMudGeometry(),
     },
@@ -940,6 +947,66 @@ function makeCoin(a: Assets, y: number) {
   return g
 }
 
+type PropKind = 'blossom' | 'pine' | 'bush' | 'rock' | 'building'
+const THEME_PROPS: PropKind[][] = [
+  ['blossom', 'pine', 'bush', 'rock'],
+  ['building', 'pine', 'bush', 'building'],
+  ['blossom', 'bush', 'blossom', 'rock'],
+  ['pine', 'rock', 'building', 'pine'],
+  ['blossom', 'bush', 'rock', 'blossom'],
+]
+const THEME_MOUNTAIN = ['#86efac', '#c4b5fd', '#f9a8d4', '#312e81', '#a5b4fc']
+
+function makePine(a: Assets) {
+  const t = new THREE.Group()
+  t.add(mesh(a.geo.trunk, a.trunkMat))
+  for (let i = 0; i < 4; i++) {
+    const cone = mesh(a.geo.pineCone, a.pineMat)
+    cone.position.y = 1.0 + i * 0.5
+    cone.scale.setScalar(1.25 - i * 0.22)
+    t.add(cone)
+  }
+  return t
+}
+
+function makeBush(a: Assets) {
+  const t = new THREE.Group()
+  const offsets: [number, number, number][] = [[0, 0.35, 0], [0.35, 0.28, 0.2], [-0.3, 0.3, -0.15]]
+  offsets.forEach(([x, y, z], i) => {
+    const b = mesh(a.geo.bush, a.bushMats[i % a.bushMats.length])
+    b.position.set(x, y, z)
+    t.add(b)
+  })
+  return t
+}
+
+function makeRock(a: Assets) {
+  const r = mesh(a.geo.rock, a.rockMat)
+  r.position.y = 0.3
+  r.rotation.set(Math.random(), Math.random(), 0)
+  const g = new THREE.Group()
+  g.add(r)
+  return g
+}
+
+function makeBuilding(a: Assets) {
+  const g = new THREE.Group()
+  const h = 3 + Math.random() * 4
+  const w = 1.6 + Math.random() * 0.8
+  const body = mesh(new THREE.BoxGeometry(w, h, 1.6), a.buildingMats[Math.floor(Math.random() * a.buildingMats.length)])
+  body.position.y = h / 2
+  g.add(body)
+  return g
+}
+
+function makeProp(a: Assets, kind: PropKind) {
+  if (kind === 'blossom') return makeTree(a)
+  if (kind === 'pine') return makePine(a)
+  if (kind === 'bush') return makeBush(a)
+  if (kind === 'rock') return makeRock(a)
+  return makeBuilding(a)
+}
+
 function makeTree(a: Assets) {
   const t = new THREE.Group()
   const trunk = mesh(a.geo.trunk, a.trunkMat)
@@ -1041,6 +1108,53 @@ export default function App() {
     sun.target.position.set(0, 0, -4)
     scene.add(sun, sun.target)
 
+    type Slot = { side: number; z: number; group: THREE.Group | null; baseX: number; kind: PropKind | null }
+    const propSlots: Slot[] = []
+    for (const side of [-1, 1]) {
+      for (let z = -TRACK_LEN; z < 10; z += 7) propSlots.push({ side, z: z + Math.random() * 2, group: null, baseX: 0, kind: null })
+    }
+    const setSlotKind = (slot: Slot, kind: PropKind) => {
+      if (slot.group) scene.remove(slot.group)
+      slot.kind = kind
+      slot.baseX = slot.side * (kind === 'building' ? 7.2 + Math.random() * 1.6 : 5.6 + Math.random() * 1.8)
+      slot.group = makeProp(a, kind)
+      slot.group.position.set(slot.baseX, 0, slot.z)
+      scene.add(slot.group)
+    }
+
+    const mountainMat = new THREE.MeshStandardMaterial({ color: THEME_MOUNTAIN[0], roughness: 1 })
+    for (let i = -7; i <= 7; i++) {
+      for (const [z, h, sc] of [[-150, 22, 1.6], [-130, 16, 1.2]] as [number, number, number][]) {
+        const peak = new THREE.Mesh(new THREE.ConeGeometry(12 * sc, h * (0.8 + Math.random() * 0.5), 6), mountainMat)
+        peak.position.set(i * 20 + (Math.random() - 0.5) * 6, h * 0.5, z)
+        scene.add(peak)
+      }
+    }
+
+    const starGeo = new THREE.BufferGeometry()
+    const starPos = new Float32Array(300 * 3)
+    for (let i = 0; i < 300; i++) {
+      starPos[i * 3] = (Math.random() - 0.5) * 120
+      starPos[i * 3 + 1] = 14 + Math.random() * 22
+      starPos[i * 3 + 2] = -140 + Math.random() * 60
+    }
+    starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3))
+    const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: '#ffffff', size: 0.35, transparent: true, opacity: 0.9 }))
+    stars.visible = false
+    scene.add(stars)
+
+    const rainbow = new THREE.Group()
+    ;['#ef4444', '#f97316', '#facc15', '#22c55e', '#3b82f6', '#a855f7'].forEach((c, i) => {
+      const arc = new THREE.Mesh(
+        new THREE.TorusGeometry(24 - i * 0.9, 0.5, 8, 48, Math.PI),
+        new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.25, roughness: 0.5 }),
+      )
+      rainbow.add(arc)
+    })
+    rainbow.position.set(0, 0.5, -120)
+    rainbow.visible = false
+    scene.add(rainbow)
+
     let skyTex: THREE.CanvasTexture | null = null
     let currentTheme = -1
     const applyTheme = (index: number) => {
@@ -1054,6 +1168,13 @@ export default function App() {
       a.grassMat.color.set(t.grass)
       sun.intensity = t.sun
       hemi.intensity = index === 3 ? 0.7 : 1.0
+      mountainMat.color.set(THEME_MOUNTAIN[index])
+      stars.visible = index === 3
+      rainbow.visible = index === 4
+      for (const slot of propSlots) {
+        const choices = THEME_PROPS[index]
+        setSlotKind(slot, choices[Math.floor(Math.random() * choices.length)])
+      }
     }
     applyTheme(0)
 
@@ -1123,16 +1244,6 @@ export default function App() {
       }
     }
 
-    const trees: { group: THREE.Group; baseX: number }[] = []
-    for (const side of [-1, 1]) {
-      for (let z = -TRACK_LEN; z < 10; z += 7) {
-        const t = makeTree(a)
-        const baseX = side * (5.6 + Math.random() * 1.6)
-        t.position.set(baseX, 0, z + Math.random() * 2)
-        scene.add(t)
-        trees.push({ group: t, baseX })
-      }
-    }
 
     const clouds: THREE.Group[] = []
     for (let i = 0; i < 9; i++) {
@@ -1320,10 +1431,13 @@ export default function App() {
         c.mesh.position.set(c.side * (ROAD_HALF + 0.15) + offsetAt(s.dist, c.z), 0.07, c.z)
         c.mesh.rotation.y = Math.atan2(slope, 1)
       }
-      for (const t of trees) {
-        t.group.position.z += s.speed
-        if (t.group.position.z > 8) t.group.position.z -= TRACK_LEN + 10
-        t.group.position.x = t.baseX + offsetAt(s.dist, t.group.position.z)
+      for (const slot of propSlots) {
+        slot.z += s.speed
+        if (slot.z > 8) slot.z -= TRACK_LEN + 10
+        if (slot.group) {
+          slot.group.position.z = slot.z
+          slot.group.position.x = slot.baseX + offsetAt(s.dist, slot.z)
+        }
       }
       for (const c of clouds) {
         c.position.x -= 0.004
