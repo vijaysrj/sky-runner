@@ -68,7 +68,7 @@ function saveLevel(n: number) {
 }
 
 type Status = 'ready' | 'playing' | 'over'
-type Kind = 'crate' | 'overhead' | 'car' | 'train' | 'ramp' | 'puddle' | 'lava' | 'animal' | 'speed' | 'jump'
+type Kind = 'crate' | 'overhead' | 'car' | 'train' | 'ramp' | 'puddle' | 'lava' | 'animal' | 'speed' | 'jump' | 'cone' | 'hurdle' | 'boulder' | 'bird' | 'spikes' | 'wall'
 type Obstacle = { kind: Kind; lane: number; z: number; hit: boolean; color: number; cross: number; dir: number }
 type Coin = { lane: number; z: number; y: number; taken: boolean }
 type Action = 'left' | 'right' | 'jump' | 'slide'
@@ -96,6 +96,7 @@ type State = {
   speedBoost: number
   jumpBoost: number
   loaded: boolean
+  failLevel: number
 }
 
 const THEMES = [
@@ -109,9 +110,9 @@ const THEMES = [
 const CAR_COLORS = [0xf472b6, 0xa855f7, 0x38bdf8, 0xfacc15]
 const TRAIN_COLOR = 0x22d3ee
 
-const NEEDED_HEIGHT: Partial<Record<Kind, number>> = { crate: 0.5, lava: 0.5, car: 3.0, train: 3.4 }
+const NEEDED_HEIGHT: Partial<Record<Kind, number>> = { crate: 0.5, lava: 0.5, car: 3.0, train: 3.4, cone: 0.6, hurdle: 0.95, boulder: 3.3, spikes: 0.9, wall: 3.4 }
 const PLAYER_HALF_DEPTH = 0.2
-const HALF_LEN: Record<Kind, number> = { crate: 0.35, overhead: 0.5, car: 1.1, train: 3.0, ramp: 0.8, puddle: 0.8, lava: 0.9, animal: 0.6, speed: 0.6, jump: 0.6 }
+const HALF_LEN: Record<Kind, number> = { crate: 0.35, overhead: 0.5, car: 1.1, train: 3.0, ramp: 0.8, puddle: 0.8, lava: 0.9, animal: 0.6, speed: 0.6, jump: 0.6, cone: 0.3, hurdle: 0.45, boulder: 0.8, bird: 0.6, spikes: 0.5, wall: 1.3 }
 const FUMBLE_FRAMES = 150
 
 function bend(p: number) {
@@ -169,10 +170,12 @@ function reset(s: State) {
     fumble: 0,
     speedBoost: 0,
     jumpBoost: 0,
+    failLevel: 1,
   })
 }
 
 function act(s: State, a: Action) {
+  if (s.status === 'over') return
   if (s.status !== 'playing') {
     if (s.loaded) reset(s)
     return
@@ -192,15 +195,27 @@ function pickKind(level: number): Kind | 'coins' {
     ['coins', 6],
     ['crate', 3],
     ['ramp', 1.5 + level * 0.3],
+    ['puddle', 2],
+    ['speed', 0.6],
+    ['jump', 0.6],
   ]
-  weights.push(['puddle', 2])
-  if (level >= 2) weights.push(['lava', 1 + level * 0.3])
-  if (level >= 2) weights.push(['animal', 1 + level * 0.2])
-  weights.push(['speed', 0.6])
-  weights.push(['jump', 0.6])
-  if (level >= 2) weights.push(['overhead', 2])
-  if (level >= 2) weights.push(['car', 1.5 + level * 0.4])
-  if (level >= 2) weights.push(['train', 0.6 + level * 0.2])
+  if (level >= 2) {
+    weights.push(['cone', 2.5 + level * 0.3])
+    weights.push(['lava', 1 + level * 0.3])
+    weights.push(['animal', 1 + level * 0.2])
+    weights.push(['overhead', 1.5 + level * 0.2])
+    weights.push(['car', 1.5 + level * 0.4])
+  }
+  if (level >= 3) {
+    weights.push(['hurdle', 2 + level * 0.2])
+    weights.push(['boulder', 1.2 + level * 0.3])
+    weights.push(['train', 0.8 + level * 0.2])
+  }
+  if (level >= 4) {
+    weights.push(['bird', 1.8 + level * 0.3])
+    weights.push(['spikes', 1.8 + level * 0.3])
+    weights.push(['wall', 1.2 + level * 0.3])
+  }
   const total = weights.reduce((sum, [, w]) => sum + w, 0)
   let r = Math.random() * total
   for (const [kind, w] of weights) {
@@ -211,8 +226,8 @@ function pickKind(level: number): Kind | 'coins' {
 }
 
 function spawn(s: State) {
-  const lane = Math.floor(Math.random() * 3)
   const kind = pickKind(s.level)
+  const lane = kind === 'wall' ? Math.floor(Math.random() * 2) : Math.floor(Math.random() * 3)
   if (kind === 'coins') {
     for (let i = 0; i < 4; i++) s.coins.push({ lane, z: -TRACK_LEN - i * 1.4, y: 1.0, taken: false })
     return
@@ -294,7 +309,8 @@ function update(s: State, paceMul: number) {
       }
       continue
     }
-    if (o.hit || o.lane !== s.lane || Math.abs(o.z) > HALF_LEN[o.kind] + PLAYER_HALF_DEPTH) continue
+    const covered = o.kind === 'wall' ? s.lane === o.lane || s.lane === o.lane + 1 : o.lane === s.lane
+    if (o.hit || !covered || Math.abs(o.z) > HALF_LEN[o.kind] + PLAYER_HALF_DEPTH) continue
     if (o.kind === 'ramp') {
       if (o.lane === s.lane && Math.abs(o.z) < 0.8) {
         const h = (RAMP_HEIGHT * (o.z + 0.8)) / 1.6
@@ -317,7 +333,7 @@ function update(s: State, paceMul: number) {
     }
     if (s.invuln > 0) continue
     const blocked =
-      o.kind === 'overhead' ? s.py + playerH > 1.25 : s.py < (NEEDED_HEIGHT[o.kind] ?? 1)
+      o.kind === 'overhead' || o.kind === 'bird' ? s.py + playerH > (o.kind === 'bird' ? 1.2 : 1.25) : s.py < (NEEDED_HEIGHT[o.kind] ?? 1)
     if (blocked) {
       o.hit = true
       s.hearts--
@@ -501,6 +517,12 @@ function buildAssets() {
     stemMat: new THREE.MeshStandardMaterial({ color: '#f5f5f4', roughness: 0.5 }),
     capMat: new THREE.MeshStandardMaterial({ color: '#22c55e', emissive: '#14532d', emissiveIntensity: 0.4, roughness: 0.5 }),
     dotMat: new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.4 }),
+    coneMat: new THREE.MeshStandardMaterial({ color: '#f97316', roughness: 0.6 }),
+    stripeMat: new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.6 }),
+    stoneMat: new THREE.MeshStandardMaterial({ color: '#78716c', roughness: 0.95 }),
+    birdMat: new THREE.MeshStandardMaterial({ color: '#334155', roughness: 0.7 }),
+    spikeMat: new THREE.MeshStandardMaterial({ color: '#94a3b8', metalness: 0.6, roughness: 0.3 }),
+    wallMat: new THREE.MeshStandardMaterial({ color: '#9a3412', roughness: 0.9 }),
     dogMat: new THREE.MeshStandardMaterial({ color: '#b45309', roughness: 0.8 }),
     dogDarkMat: new THREE.MeshStandardMaterial({ color: '#451a03', roughness: 0.8 }),
     lavaMat: new THREE.MeshStandardMaterial({ map: lavaTex, emissive: '#f97316', emissiveMap: lavaTex, emissiveIntensity: 0.9, roughness: 0.4 }),
@@ -814,6 +836,81 @@ function makeJumpPickup(a: Assets) {
   return g
 }
 
+function makeCone(a: Assets) {
+  const g = new THREE.Group()
+  g.add(mesh(new THREE.BoxGeometry(0.62, 0.06, 0.62), a.dogDarkMat, false))
+  const cone = mesh(new THREE.ConeGeometry(0.28, 0.7, 16), a.coneMat)
+  cone.position.y = 0.4
+  const stripe = mesh(new THREE.CylinderGeometry(0.19, 0.24, 0.12, 16), a.dotMat, false)
+  stripe.position.y = 0.36
+  g.add(cone, stripe)
+  return g
+}
+
+function makeHurdle(a: Assets) {
+  const g = new THREE.Group()
+  for (const x of [-0.5, 0.5]) {
+    const post = mesh(new THREE.BoxGeometry(0.08, 0.95, 0.08), a.woodMat)
+    post.position.set(x, 0.475, 0)
+    g.add(post)
+  }
+  const bar = mesh(new THREE.BoxGeometry(1.2, 0.14, 0.12), a.stripeMat)
+  bar.position.y = 0.85
+  g.add(bar)
+  return g
+}
+
+function makeBoulder(a: Assets) {
+  const g = new THREE.Group()
+  const rock = mesh(new THREE.DodecahedronGeometry(0.75, 0), a.stoneMat)
+  rock.position.y = 0.75
+  g.add(rock)
+  g.userData.spin = rock
+  return g
+}
+
+function makeBird(a: Assets) {
+  const g = new THREE.Group()
+  const body = mesh(new THREE.SphereGeometry(0.3, 14, 10), a.birdMat)
+  body.scale.set(1.6, 0.8, 1)
+  body.position.y = 1.5
+  const beak = mesh(new THREE.ConeGeometry(0.08, 0.22, 8), a.coneMat)
+  beak.rotation.z = -Math.PI / 2
+  beak.position.set(0.42, 1.5, 0)
+  const wings: THREE.Mesh[] = []
+  for (const side of [-1, 1]) {
+    const wing = mesh(new THREE.BoxGeometry(0.9, 0.05, 0.42), a.birdMat)
+    wing.position.set(0, 1.5, side * 0.4)
+    wings.push(wing)
+  }
+  g.add(body, beak, ...wings)
+  g.userData.wings = wings
+  return g
+}
+
+function makeSpikes(a: Assets) {
+  const g = new THREE.Group()
+  for (const [x, z] of [[0, 0], [0.35, 0.25], [-0.35, 0.25], [0.2, -0.3], [-0.25, -0.25]]) {
+    const spike = mesh(new THREE.ConeGeometry(0.12, 0.6, 8), a.spikeMat)
+    spike.position.set(x, 0.3, z)
+    g.add(spike)
+  }
+  return g
+}
+
+function makeWall(a: Assets) {
+  const g = new THREE.Group()
+  const wall = mesh(new THREE.BoxGeometry(2.7, 2.2, 0.5), a.wallMat)
+  wall.position.y = 1.1
+  g.add(wall)
+  for (const x of [-1.1, 0, 1.1]) {
+    const brick = mesh(new THREE.BoxGeometry(0.08, 2.22, 0.52), a.bandMat, false)
+    brick.position.set(x, 1.1, 0)
+    g.add(brick)
+  }
+  return g
+}
+
 function makeLava(a: Assets) {
   const g = new THREE.Group()
   const disc = new THREE.Mesh(a.geo.disc, a.lavaMat)
@@ -887,6 +984,7 @@ export default function App() {
     flash: 0,
     fumble: 0,
     loaded: false,
+    failLevel: 1,
     speedBoost: 0,
     jumpBoost: 0,
   })
@@ -1119,6 +1217,7 @@ export default function App() {
         const wasPlaying = s.status === 'playing'
         update(s, PACE_OPTIONS.find((o) => o.value === settingsRef.current.pace)?.mul ?? 1)
         if (wasPlaying && s.status === 'over') {
+          s.failLevel = s.level
           const score = scoreOf(s)
           if (score > s.best) {
             s.best = score
@@ -1223,6 +1322,12 @@ export default function App() {
           else if (o.kind === 'animal') m = makeAnimal(a)
           else if (o.kind === 'speed') m = makeSpeedPickup(a)
           else if (o.kind === 'jump') m = makeJumpPickup(a)
+          else if (o.kind === 'cone') m = makeCone(a)
+          else if (o.kind === 'hurdle') m = makeHurdle(a)
+          else if (o.kind === 'boulder') m = makeBoulder(a)
+          else if (o.kind === 'bird') m = makeBird(a)
+          else if (o.kind === 'spikes') m = makeSpikes(a)
+          else if (o.kind === 'wall') m = makeWall(a)
           else m = makeRamp(a)
           scene.add(m)
           obstacleMeshes.set(o, m)
@@ -1230,6 +1335,18 @@ export default function App() {
         if (o.kind === 'speed' || o.kind === 'jump') {
           m.position.set(LANE_X[o.lane] + offsetAt(s.dist, o.z), 0, o.z)
           m.rotation.y += 0.06
+        } else if (o.kind === 'wall') {
+          m.position.set((LANE_X[o.lane] + LANE_X[o.lane + 1]) / 2 + offsetAt(s.dist, o.z), 0, o.z)
+        } else if (o.kind === 'boulder') {
+          m.position.set(LANE_X[o.lane] + offsetAt(s.dist, o.z), 0, o.z)
+          const rock = m.userData.spin as THREE.Object3D | undefined
+          if (rock) rock.rotation.x += s.speed * 2.5
+        } else if (o.kind === 'bird') {
+          m.position.set(LANE_X[o.lane] + offsetAt(s.dist, o.z), 0, o.z)
+          const wings = (m.userData.wings as THREE.Mesh[] | undefined) ?? []
+          wings.forEach((w, i) => {
+            w.rotation.x = Math.sin(s.tick * 0.4 + i) * 0.6
+          })
         } else if (o.kind === 'animal') {
           m.position.set(animalX(o) + offsetAt(s.dist, o.z), 0, o.z)
           m.rotation.y = o.dir > 0 ? Math.PI / 2 : -Math.PI / 2
@@ -1342,6 +1459,11 @@ export default function App() {
     saveSettings(settings)
   }, [settings])
 
+  function startRun(level: number) {
+    saveLevel(level)
+    reset(stateRef.current)
+  }
+
   const press = (action: Action) => (e: React.PointerEvent) => {
     e.preventDefault()
     act(stateRef.current, action)
@@ -1438,7 +1560,9 @@ export default function App() {
           {hud.status !== 'playing' && (
             <div
               className="absolute inset-0 flex flex-col items-center justify-center rounded-3xl bg-slate-900/40 text-white text-center p-6"
-              onPointerDown={() => act(stateRef.current, 'jump')}
+              onPointerDown={() => {
+                if (hud.status === 'ready') act(stateRef.current, 'jump')
+              }}
             >
               {hud.status === 'ready' ? (
                 <>
@@ -1447,11 +1571,32 @@ export default function App() {
                 </>
               ) : (
                 <>
-                  <h1 className="text-3xl font-extrabold mb-2">Good run!</h1>
+                  <h1 className="text-3xl font-extrabold mb-2">Game over</h1>
                   <p className="text-lg">Score {hud.score}</p>
-                  <p className="text-md mb-2">Reached Level {hud.level}</p>
-                  <p className="text-md mb-6">Best {hud.best}</p>
-                  <span className="rounded-full bg-white text-slate-900 px-6 py-3 font-bold">Play again</span>
+                  <p className="text-md mb-1">Best {hud.best}</p>
+                  <p className="text-md mb-5">You reached Level {hud.level}</p>
+                  <div className="flex flex-col gap-3 w-full max-w-[240px]">
+                    <button
+                      type="button"
+                      onPointerDown={(e) => {
+                        e.stopPropagation()
+                        startRun(hud.level)
+                      }}
+                      className="rounded-full bg-white text-slate-900 px-6 py-3 font-bold"
+                    >
+                      Continue from Level {hud.level}
+                    </button>
+                    <button
+                      type="button"
+                      onPointerDown={(e) => {
+                        e.stopPropagation()
+                        startRun(1)
+                      }}
+                      className="rounded-full border-2 border-white px-6 py-3 font-bold"
+                    >
+                      Start from Level 1
+                    </button>
+                  </div>
                 </>
               )}
               <button
