@@ -111,7 +111,7 @@ const THEMES = [
 const CAR_COLORS = [0xf472b6, 0xa855f7, 0x38bdf8, 0xfacc15]
 const TRAIN_COLOR = 0x22d3ee
 
-const NEEDED_HEIGHT: Partial<Record<Kind, number>> = { crate: 0.5, lava: 0.5, car: 3.0, train: 3.4, cone: 0.6, hurdle: 0.95, boulder: 3.3, spikes: 0.9, wall: 3.4 }
+const NEEDED_HEIGHT: Partial<Record<Kind, number>> = { crate: 0.5, lava: 0.5, car: 2.6, train: 3.0, cone: 0.6, hurdle: 0.95, boulder: 3.3, spikes: 0.9, wall: 3.4 }
 const PLAYER_HALF_DEPTH = 0.2
 const HALF_LEN: Record<Kind, number> = { crate: 0.35, overhead: 0.5, car: 1.1, train: 3.0, ramp: 0.8, puddle: 0.8, lava: 0.9, animal: 0.6, speed: 0.6, jump: 0.6, cone: 0.3, hurdle: 0.45, boulder: 0.8, bird: 0.6, spikes: 0.5, wall: 1.3 }
 const FUMBLE_FRAMES = 150
