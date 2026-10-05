@@ -1804,13 +1804,6 @@ export default function App() {
               </button>
               <button
                 type="button"
-                onPointerDown={() => saveLevel(1)}
-                className="rounded-full border border-white/70 px-6 py-2 text-sm font-bold"
-              >
-                Start again from Level 1
-              </button>
-              <button
-                type="button"
                 onPointerDown={() => setShowSettings(false)}
                 className="rounded-full bg-pink-500 px-8 py-3 font-bold"
               >
